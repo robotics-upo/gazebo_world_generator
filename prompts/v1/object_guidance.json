@@ -1,0 +1,35 @@
+{
+  "television": "**SPECIFIC GUIDANCE FOR 'TELEVISION' or 'TV':**\n- Look ONLY for large screen displays meant for viewing from a distance (living room entertainment)\n- Prefer models with \"Television\", \"TV\", \"Flatscreen\" in the name\n- **CRITICAL REJECTION**: Computer monitors (MonitorAndKeyboard, DisplayScreen, etc.) are NOT televisions\n- REJECT: Monitors, computer displays, projectors\n- If no actual television model exists, respond with 'None' - do NOT substitute with a monitor",
+  
+  "tv_stand": "**SPECIFIC GUIDANCE FOR 'TV_STAND', 'TELEVISION_STAND', or 'TV STAND':**\n- Look ONLY for furniture specifically designed to hold a television\n- Prefer models with \"TV_Stand\", \"TVStand\", \"Entertainment_Center\", \"Media_Console\" in the name\n- **CRITICAL REJECTION**: Generic shelves (Bookshelf, Shelf_with_boxes, etc.) are NOT TV stands\n- REJECT: Bookshelves, storage shelves, tables, desks\n- If no actual TV stand exists, respond with 'None' - do NOT substitute with generic shelving",
+  
+  "monitor": "**SPECIFIC GUIDANCE FOR 'MONITOR':**\n- Look for computer monitors, displays, or screen models\n- **BEST CHOICE**: Models like \"MonitorAndKeyboard\" are PERFECT for office monitors\n- Prefer models with \"Monitor\", \"Display\", \"Screen\", \"Computer\" in the name\n- Models with \"Keyboard\" are acceptable and encouraged for office setups\n- **STRONGLY REJECT**: Medical monitors (BloodPressureMonitor, HeartMonitor, etc.) - these are medical devices, NOT computer monitors\n- REJECT: Security monitors, CCTV displays unless in security context\n- REJECT: Televisions (these are for entertainment, not work)",
+  
+  "desk": "**SPECIFIC GUIDANCE FOR 'DESK':**\n- Look for office desks, work desks, or table-like furniture for working\n- Prefer models with \"Desk\", \"OfficeDesk\", \"WorkDesk\" in the name\n- REJECT: Outdoor furniture, reception desks (unless in reception context)",
+  
+  "chair": "**SPECIFIC GUIDANCE FOR 'CHAIR':**\n- Look for office chairs, seating furniture\n- Prefer models with \"Chair\", \"OfficeChair\", \"Seat\" in the name\n- REJECT: Outdoor chairs (unless in outdoor context), stools, benches",
+  
+  "table": "**SPECIFIC GUIDANCE FOR 'TABLE':**\n- Look for tables suitable for the context (dining, coffee, conference)\n- Prefer models with \"Table\" in the name matching the context\n- REJECT: Desks (unless specifically requested), outdoor picnic tables (for indoor)",
+  
+  "shelf": "**SPECIFIC GUIDANCE FOR 'SHELF' or 'BOOKSHELF':**\n- Look for shelving units, bookcases, storage shelves\n- Prefer models with \"Shelf\", \"Bookshelf\", \"Shelving\" in the name\n- REJECT: Single shelves, decorative displays",
+  
+  "plant": "**SPECIFIC GUIDANCE FOR 'PLANT':**\n- MUST have visible vegetation (leaves, flowers, greenery)\n- Prefer models with \"Plant\", \"Potted\" in the name\n- REJECT: Empty pots, containers, saucers without plants",
+  
+  "wardrobe": "**SPECIFIC GUIDANCE FOR 'WARDROBE' or 'CLOSET':**\n- Look for tall storage furniture for clothing (typically 2m+ height)\n- Prefer models with \"Wardrobe\", \"Closet\", \"Armoire\", \"Dresser\" in the name\n- **CRITICAL REJECTION**: Furniture sets (PARENT_ROOM_FURNITURE_SET, etc.) are NOT wardrobes - they contain multiple items\n- REJECT: Small cabinets, shelving units, drawer sets, furniture collections\n- Must be a SINGLE standalone wardrobe unit, not a collection\n- If no actual wardrobe exists, respond with 'None' - do NOT substitute with furniture sets",
+  
+  "shelving_unit": "**SPECIFIC GUIDANCE FOR 'SHELVING_UNIT', 'SHELVING', or 'STORAGE_RACK':**\n- Look for industrial/commercial shelving or storage racks\n- Prefer models with \"Shelf\", \"Shelving\", \"Rack\", \"Storage\" in the name\n- ACCEPT: StorageRack, ShelvingUnit, IndustrialShelf\n- For warehouse context, prefer large industrial units over small home shelves",
+  
+  "storage_rack": "**SPECIFIC GUIDANCE FOR 'STORAGE_RACK':**\n- Industrial/warehouse storage units with multiple levels\n- Prefer \"StorageRack\", \"Rack\", \"Warehouse\" models\n- ACCEPT: Generic shelving if specifically industrial/warehouse oriented\n- REJECT: Small home shelves, bookcases",
+  
+  "pallet": "**SPECIFIC GUIDANCE FOR 'PALLET':**\n- Wooden/plastic platforms for stacking cargo (typically ~1.2m x 0.8m)\n- Prefer models with \"Pallet\", \"Euro_pallet\", \"Cargo\" in the name\n- ACCEPT: Euro_pallet, Pallet, WoodenPallet",
+  
+  "workstation": "**SPECIFIC GUIDANCE FOR 'WORKSTATION' or 'WORKBENCH':**\n- Work surface for assembly/manufacturing/packing tasks\n- Can be table, bench, or desk used for work\n- Prefer models with \"Workbench\", \"Table\", \"Desk\" in the name\n- ACCEPT: Industrial tables, work surfaces, assembly benches\n- For warehouse context, prefer sturdy tables over office desks",
+  
+  "staging_table": "**SPECIFIC GUIDANCE FOR 'STAGING_TABLE':**\n- Temporary work surface for sorting/organizing items\n- Simple table or flat work surface\n- Prefer models with \"Table\", \"Workbench\" in the name\n- ACCEPT: cafe_table, table, workbench models",
+  
+  "forklift": "**SPECIFIC GUIDANCE FOR 'FORKLIFT':**\n- Industrial vehicle with lifting forks\n- Prefer models with \"Forklift\", \"Lift\", \"Vehicle\" in the name\n- If no forklift exists, respond with 'None' - no good substitute exists\n- DO NOT use pallets, boxes, or other cargo as substitutes",
+  
+  "hand_truck": "**SPECIFIC GUIDANCE FOR 'HAND_TRUCK' or 'DOLLY':**\n- Manual cart with wheels for moving boxes/items\n- Prefer models with \"Cart\", \"Dolly\", \"Truck\", \"Trolley\" in the name\n- If no hand truck exists, respond with 'None' - no good substitute\n- DO NOT use pallets or static objects as substitutes",
+  
+  "conveyor_system": "**SPECIFIC GUIDANCE FOR 'CONVEYOR_SYSTEM' or 'CONVEYOR_BELT':**\n- Automated belt/roller system for moving items\n- Prefer models with \"Conveyor\", \"Belt\", \"Roller\" in the name\n- This is specialized industrial equipment - rarely available in standard model sets\n- If no conveyor exists, respond with 'None' - no reasonable substitute"
+}

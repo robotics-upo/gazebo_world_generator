@@ -1,0 +1,139 @@
+# =============================================================================
+# Gazebo World Generator - Configuration File
+# =============================================================================
+# 
+# This file contains all configuration settings for the world generator.
+# Edit the values below to customize your setup.
+#
+# Quick Start:
+#   1. Set your LLM server URL and model name below
+#   2. Run: ros2 run gazebo_world_generator generate_world
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# LLM Server Configuration
+# -----------------------------------------------------------------------------
+# Configure your Large Language Model server connection
+
+llm:
+  # Server URL - The endpoint for your LLM server
+  # Options:
+  #   - LM Studio:  http://localhost:1234/v1
+  #   - Ollama:     http://localhost:11434/v1
+  #   - OpenAI:     https://api.openai.com/v1
+  #   - Custom:     Your server URL
+  server_url: "http://localhost:1234/v1"
+  
+  # Model name - The specific model to use
+  # Examples:
+  #   - Qwen/Qwen3-VL-30B-A3B-Instruct-FP8
+  #   - Qwen/Qwen2.5-VL-32B-Instruct-AWQ
+  #   - llama3.1:8b
+  #   - gpt-4
+  model_name: "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8"
+
+# -----------------------------------------------------------------------------
+# Output Configuration
+# -----------------------------------------------------------------------------
+# Control where and how generated worlds are saved
+
+output:
+  # Base directory for all generated worlds
+  # Subdirectories will be created automatically:
+  #   - worlds/           (SDF world files)
+  #   - logs/             (Generation logs)
+  #   - occupancy_maps/   (Navigation maps)
+  base_directory: "generated_worlds"
+  
+  # Automatically generate occupancy maps for navigation
+  auto_generate_map: true
+
+# -----------------------------------------------------------------------------
+# Model Resolution Configuration
+# -----------------------------------------------------------------------------
+# Configure how furniture/object models are found and downloaded
+
+models:
+  # Local Gazebo model search paths
+  # The system will search these directories for installed models
+  search_paths:
+    - "~/.gazebo/models"
+    - "/usr/share/gazebo-11/models"
+    - "/usr/local/share/gazebo-11/models"
+  
+  # Model download/cache directory
+  # Downloaded models will be stored here
+  cache_directory: "~/.gazebo/models"
+  
+  # Online model resolution settings
+  max_concurrent_downloads: 3
+  max_search_results: 15
+
+# -----------------------------------------------------------------------------
+# Placement Configuration
+# -----------------------------------------------------------------------------
+# Fine-tune object placement behavior
+
+placement:
+  # Grid resolution for placement calculations (meters)
+  grid_resolution: 0.25
+  
+  # Minimum distance between objects (meters)
+  min_object_distance: 0.5
+  
+  # Clearance from walls (meters)
+  wall_clearance: 0.1
+  
+  # Validation margin for collision detection (meters)
+  validation_margin: 0.1
+  
+  # Width of traffic corridors between furniture (meters)
+  corridor_width: 1.2
+
+# -----------------------------------------------------------------------------
+# Room Configuration
+# -----------------------------------------------------------------------------
+# Default dimensions for room generation
+
+rooms:
+  # Default room height (meters)
+  default_height: 3.0
+  
+  # Wall properties
+  wall_thickness: 0.2
+  wall_height: 3.0
+
+# -----------------------------------------------------------------------------
+# Physics Configuration
+# -----------------------------------------------------------------------------
+# Gazebo physics simulation settings
+
+physics:
+  # Physics engine to use
+  engine: "ode"
+  
+  # Gravity (m/s²)
+  gravity: -9.8
+  
+  # Real-time update rate (Hz)
+  real_time_update_rate: 1000
+  
+  # Maximum simulation step size (seconds)
+  max_step_size: 0.001
+
+# -----------------------------------------------------------------------------
+# Logging Configuration
+# -----------------------------------------------------------------------------
+# Control logging verbosity
+
+logging:
+  # Overall log level: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  
+  # Module-specific log levels (optional overrides)
+  modules:
+    models.resolver: "INFO"
+    placement.engine: "INFO"
+    llm.interface: "INFO"
+    core.generator: "INFO"

@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>gazebo_world_generator</name>
+  <version>1.0.0</version>
+  <description>LLM-based Gazebo world generator</description>
+
+  <maintainer email="mescjim@upo.es">Miguel Escudero Jiménez</maintainer>
+  <license>Apache-2.0</license>
+
+  <author email="mescjim@upo.es">Miguel Escudero Jiménez</author>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>gazebo_ros</depend>
+  <depend>gazebo_ros2_2dmap_plugin</depend>
+
+
+  <exec_depend>python3-openai</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

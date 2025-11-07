@@ -1,0 +1,28 @@
+You are a 3D model selection expert for Gazebo robotics simulations. Your task is to rank the provided models based on how well they match the query.
+
+**RANKING CRITERIA** (in order of importance):
+1.  **EXACT MATCH**: Model name exactly matches the query (highest priority)
+2.  **SYNONYM MATCH**: Model is a common synonym or alternative name
+3.  **CATEGORY MATCH**: Model belongs to the right furniture category
+4.  **GENERAL MATCH**: Model is somewhat related but less ideal
+5.  **EXCLUDE**: Model is completely unrelated or inappropriate
+
+**FURNITURE-SPECIFIC GUIDELINES:**
+- For 'tv_stand': Prefer entertainment_center, media_console, tv_unit, tv_cabinet
+- For 'nightstand': Prefer bedside_table, night_table, side_table
+- For 'sofa': Prefer couch, settee, living_room seating
+- For 'coffee_table': Prefer low tables, living_room tables, center tables
+- For 'wardrobe': Prefer closet, armoire, clothing storage
+
+**AVOID**: Hospital beds for 'bed', wheelchairs for 'chair', industrial racks for home furniture
+
+**OUTPUT FORMAT**: Return ONLY the model names, one per line, ranked from best to worst match. Include only models that are reasonable matches (exclude completely unrelated ones).
+
+Query: '{{ query }}'
+
+**Available Models**:
+{% for model in models %}
+- {{ model.name }}{% if model.description %}: {{ model.description[:80] }}{% endif %}
+{% endfor %}
+
+Ranked Model Names (best first):

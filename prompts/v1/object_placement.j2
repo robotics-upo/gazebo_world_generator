@@ -1,0 +1,62 @@
+You are an expert space planner for robotics simulation. Create a realistic {{ room_type }} layout with {{ total_object_count }} objects.
+
+⚠️  CRITICAL: Output EXACTLY {{ total_object_count }} objects - count them before submitting!
+
+DESIGN PRINCIPLES:
+• Functional arrangements - think like an architect
+• Consider human workflow and movement patterns
+• Intentional positioning, not random scattering{% if grouping_principle %}{{ grouping_principle }}{% endif %}
+
+TECHNICAL REQUIREMENTS:
+1. Output ONE JSON array: [{"type":"name","pose":{"x":n,"y":n,"z":0,"roll":0,"pitch":0,"yaw":n}}]
+2. EXACTLY {{ total_object_count }} objects (COUNT THEM!)
+3. Use object types (desk, chair) NOT model names (Desk, OfficeChairBlack)
+4. NO markdown, NO explanations, NO ```json blocks
+
+ROOM-SPECIFIC LAYOUT RULES FOR {{ room_type|upper }}:
+{{ placement_rules }}
+
+COORDINATES:
+• Center: (0,0), Floor: z=0
+• X: west(-) to east(+), Y: south(-) to north(+)
+• Yaw: 0=north, 1.57=east, 3.14=south, -1.57=west
+
+ORIENTATION RULES:
+• Use "Visual Layout" and "Functional Front" descriptions for each model
+• Bookshelves: Shelves face INTO room (not walls) for access
+• Chairs: Seat forward, backrest behind - match actual geometry
+• Desks: User side faces workspace where people sit
+
+ROOM LAYOUT: '{{ room_name }}' ({{ room_width }}m × {{ room_length }}m)
+- Center point: (0, 0)
+- Room boundaries: X from {{ x_min }}m to {{ x_max }}m, Y from {{ y_min }}m to {{ y_max }}m
+- Wall positions: North={{ y_max }}m, South={{ y_min }}m, East={{ x_max }}m, West={{ x_min }}m
+{% if existing_objects_info %}
+{{ existing_objects_info }}
+{% endif %}
+{% if connections %}
+
+CONNECTIONS:
+{% for connection in connections %}
+- {{ connection.side|capitalize }} wall connects to '{{ connection.room }}'
+{% endfor %}
+{% endif %}
+{% if doorways %}
+
+DOORWAY CLEARANCE ZONES (CRITICAL - KEEP COMPLETELY CLEAR):
+⚠️  DO NOT place ANY objects in these zones - they must remain clear for entry/exit:
+{% for doorway in doorways %}
+  • {{ doorway.side|upper }} doorway: {{ doorway.description }}
+{% endfor %}
+{% endif %}
+
+OBJECTS ({{ total_object_count }} total):
+{% for obj in objects %}
+{{ obj }}
+{% endfor %}
+{% if group_instructions %}
+{{ group_instructions }}
+{% endif %}
+
+Generate JSON array with {{ total_object_count }} objects in '{{ room_name }}' ({{ room_type }} layout).
+{% if semantic_groups %}⚠️  Place grouped objects together!{% endif %}

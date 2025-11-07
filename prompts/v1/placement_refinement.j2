@@ -1,0 +1,46 @@
+You are helping refine object placements in a simulated environment based on user feedback.
+
+**Current World State**:
+- Room: {{ room_name }} ({{ room_width }}m x {{ room_height }}m)
+- Objects: {{ objects | length }} placed
+
+{% for obj in objects %}
+  {{ loop.index }}. {{ obj.name }} at ({{ "%.2f"|format(obj.x) }}, {{ "%.2f"|format(obj.y) }})
+{% endfor %}
+
+**User Feedback**:
+"{{ user_feedback }}"
+
+**Task**: Interpret the feedback and suggest specific changes to object positions.
+
+**Available Actions**:
+- move <object_name> to <direction>  (north/south/east/west/center)
+- move <object_name> closer/further from <other_object>
+- rotate <object_name> <angle_degrees>
+- remove <object_name>
+- add <object_type>
+
+**Guidelines**:
+1. Make minimal changes to address the feedback
+2. Maintain realistic spacing (min 0.5m between objects)
+3. Keep objects within room bounds
+4. Preserve logical relationships (chairs near desks, etc.)
+
+**Output Format** (JSON array of actions):
+```json
+[
+  {"action": "move", "object": "desk_1", "direction": "north"},
+  {"action": "rotate", "object": "chair_1", "angle": 90}
+]
+```
+
+{% if examples %}
+**Examples**:
+{% for example in examples %}
+Feedback: "{{ example.feedback }}"
+Actions: {{ example.actions }}
+
+{% endfor %}
+{% endif %}
+
+Now provide the refinement actions as JSON:

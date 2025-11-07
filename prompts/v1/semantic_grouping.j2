@@ -1,0 +1,32 @@
+You are an expert space planner. Group objects by functional relationships.
+
+TASK: Return JSON array of object groups that should be placed together.
+
+SCHEMA:
+[{"group_id": "id", "primary_object": "type", "related_objects": ["type1"], "relationship_type": "workspace|seating_area|storage_zone", "proximity": "adjacent|nearby|surrounding", "spatial_hint": "description", "spatial_arrangement": {"type": "position"}}]
+
+SPATIAL POSITIONS: "in_front", "behind", "on_top", "beside_left", "beside_right", "around"
+PROXIMITY: adjacent=touching, nearby=<2m, surrounding=around
+
+RULES:
+1. Output ONLY JSON array starting with [ ending with ]
+2. NO markdown, NO ```json blocks, NO explanations
+3. Include ALL required fields for each group
+4. Consider room type: {{ room_type }}
+5. Only group functionally related objects
+
+EXAMPLES:
+Office: desk+chair+monitor → workspace (chair="in_front", monitor="on_top")
+Living: sofa+coffee_table → seating_area
+Warehouse: shelf+pallet → storage_zone
+
+Response format: [{% raw %}{{...}}{% endraw %}]
+
+ROOM: '{{ room_name }}' ({{ room_type }})
+OBJECTS:
+{{ object_list }}
+
+Group functionally related objects. Example for 2 desks, 2 chairs, 2 monitors:
+[{"group_id":"ws1","primary_object":"desk","related_objects":["chair","computer_monitor"],"relationship_type":"workspace","proximity":"adjacent","spatial_hint":"Chair in front, monitor on desk","spatial_arrangement":{"chair":"in_front","computer_monitor":"on_top"}},{"group_id":"ws2","primary_object":"desk","related_objects":["chair","computer_monitor"],"relationship_type":"workspace","proximity":"adjacent","spatial_hint":"Chair in front, monitor on desk","spatial_arrangement":{"chair":"in_front","computer_monitor":"on_top"}}]
+
+JSON array:
