@@ -6,7 +6,7 @@
   <description>LLM-based Gazebo world generator</description>
 
   <maintainer email="mescjim@upo.es">Miguel Escudero Jiménez</maintainer>
-  <license>Apache-2.0</license>
+  <license>MIT</license>
 
   <author email="mescjim@upo.es">Miguel Escudero Jiménez</author>
 
