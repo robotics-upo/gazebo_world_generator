@@ -7,7 +7,13 @@
 
 Gazebo World Generator transforms your ideas into fully-functional Gazebo Classic simulations. Leveraging the power of Large Language Models, this ROS2 package intelligently interprets plain English descriptions to automatically generate collision-free layouts, place furniture, and even produce 2D navigation maps.
 
-**Please be mindful that this is a work in progress, and while we strive for accuracy, the generated worlds may require some manual adjustments to meet specific needs.**
+> [!NOTE]
+> Please be mindful that this is a work in progress, and while we strive for accuracy, the generated worlds may require some manual adjustments to meet specific needs.
+
+Console Interface             |  Generated World
+:-------------------------:|:-------------------------:
+![console](https://github.com/robotics-upo/gazebo_world_generator/blob/master/media/gazebo_world_gen_console.gif) |  ![world](https://github.com/robotics-upo/gazebo_world_generator/blob/master/media/gazebo_world_gen_world.gif)
+
 
 ## Table of Contents
 
@@ -236,6 +242,24 @@ ros2 run gazebo_world_generator generate_world
 # Manual test
 curl http://localhost:1234/v1/models
 ```
+
+### No compatible Gazebo models found
+
+This error occurs when the generator cannot find the model files corresponding to your request.
+
+First, ensure your Gazebo model paths are set up correctly. If you have custom models, add their location to the GAZEBO_MODEL_PATH environment variable:
+
+```bash
+export GAZEBO_MODEL_PATH=~/my_gazebo_models:$GAZEBO_MODEL_PATH
+```
+
+**Important**: For the generator to successfully spawn a model, its files must exist in one of two places:
+
+- Your local GAZEBO_MODEL_PATH.
+
+- The provided online Gazebo model repositories.
+
+The system is smart enough to also search for synonyms (e.g., searching for "couch" if you ask for a "sofa"), but it still needs to find the actual model files in one of those locations. If the files are missing, the process will fail.
 
 ### LLM context limit errors
 
