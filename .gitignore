@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.pyc
+.Python
+env/
+venv/
+
+# ROS2
+install/
+log/
+build/
+*.log
+
+# Generated files
+generated_worlds/
+*.sdf
+*.world
+test_output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Prompt metrics
+prompts/.metrics.json
+
+# Temporary files
+*.tmp
+*.bak
