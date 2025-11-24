@@ -7,13 +7,13 @@
 
 Gazebo World Generator transforms your ideas into fully-functional Gazebo Classic simulations. Leveraging the power of Large Language Models, this ROS2 package intelligently interprets plain English descriptions to automatically generate collision-free layouts, place furniture, and even produce 2D navigation maps.
 
-> [!NOTE]
-> Please be mindful that this is a work in progress, and while we strive for accuracy, the generated worlds may require some manual adjustments to meet specific needs.
-
 Console Interface             |  Generated World
 :-------------------------:|:-------------------------:
-![console](https://github.com/robotics-upo/gazebo_world_generator/blob/master/media/gazebo_world_gen_console.gif) |  ![world](https://github.com/robotics-upo/gazebo_world_generator/blob/master/media/gazebo_world_gen_world.gif)
+![console](https://github.com/robotics-upo/gazebo_world_generator/blob/master/media/gazebo_world_gen_console.gif) | *"A 12x10 m warehouse with 8 pallets and 10 shelves connected to a small office with a desk and a chair"* ![world](https://github.com/robotics-upo/gazebo_world_generator/blob/master/media/gazebo_world_gen_world.gif)
 
+
+> [!NOTE]
+> Please be mindful that this is a work in progress, and while we strive for accuracy, the generated worlds may require some manual adjustments to meet specific needs.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ Console Interface             |  Generated World
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [Usage Examples](#usage-examples)
+- [Usage Examples](#usage-examples-non-interactive)
 - [Configuration](#configuration)
 - [Output Files](#output-files)
 - [Command Line Options](#command-line-options)
@@ -101,7 +101,7 @@ This opens an interactive menu:
 3. Test your LLM server connection
 4. Exit
 
-## Usage Examples
+## Usage Examples (non-interactive)
 
 ### Basic world creation
 
