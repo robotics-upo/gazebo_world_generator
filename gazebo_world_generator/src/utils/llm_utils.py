@@ -148,19 +148,21 @@ def extract_json_from_response(response: str) -> Optional[Any]:
         r'\{[\s\S]*\}'   # Objects (GREEDY)
     ]
 
+    all_matches = []
     for pattern in json_patterns:
-        matches = re.findall(pattern, response, re.DOTALL)
-        # Try matches from longest to shortest
-        for match_str in sorted(matches, key=len, reverse=True):
-            try:
-                # Try to sanitize and parse
-                sanitized = _sanitize_json_string(match_str)
-                result = json5.loads(sanitized)
-                logger.debug(f"Successfully parsed JSON with pattern {pattern}, length: {len(match_str)}")
-                return result
-            except Exception as e:
-                logger.debug(f"Failed to parse match of length {len(match_str)}: {e}")
-                continue
+        all_matches.extend(re.findall(pattern, response, re.DOTALL))
+    
+    # Try matches from longest to shortest
+    for match_str in sorted(all_matches, key=len, reverse=True):
+        try:
+            # Try to sanitize and parse
+            sanitized = _sanitize_json_string(match_str)
+            result = json5.loads(sanitized)
+            logger.debug(f"Successfully parsed JSON from match of length {len(match_str)}")
+            return result
+        except Exception as e:
+            logger.debug(f"Failed to parse match of length {len(match_str)}: {e}")
+            continue
 
     # Strategy 4: Emergency extraction with balanced bracket matching
     # Find properly balanced array structures
