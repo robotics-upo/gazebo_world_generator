@@ -9,21 +9,25 @@ import logging
 import math
 import json
 import random
-from typing import Dict, List, Optional, Tuple
-import tiktoken
+from typing import List, Dict, Optional, Tuple
 from transformers import AutoTokenizer
 
 from gazebo_world_generator.src.core.data_models import Room, GazeboModel
-from gazebo_world_generator.src.utils import llm_utils
-from gazebo_world_generator.src.utils.file_utils import find_gazebo_model_path
-from gazebo_world_generator.src.utils.sdf_utils import extract_model_metadata
+from gazebo_world_generator.src.config.settings import DEFAULT_MODEL
+from gazebo_world_generator.src.placement.semantic_grouping import SemanticGroupingEngine
 from gazebo_world_generator.src.utils.sdf_parser import SDFDimensionExtractor
 from gazebo_world_generator.src.utils.collision_detection import CollisionDetector
-from gazebo_world_generator.src.placement.semantic_grouping import SemanticGroupingEngine
-from gazebo_world_generator.src.config.settings import DEFAULT_MODEL
+from gazebo_world_generator.src.utils.file_utils import find_gazebo_model_path
+from gazebo_world_generator.src.utils import llm_utils
 from gazebo_world_generator.src.config.validated_settings import PlacementConfig, RoomConfig
 from gazebo_world_generator.src.utils.json_validator import JSONValidator
 from gazebo_world_generator.src.prompts.manager import PromptManager
+
+from gazebo_world_generator.src.placement.spatial import SpatialRegistry
+from gazebo_world_generator.src.placement.strategies.grid_placement import GridPlacementStrategy
+from gazebo_world_generator.src.placement.strategies.wall_placement import WallPlacementStrategy
+from gazebo_world_generator.src.placement.strategies.center_placement import CenterPlacementStrategy
+from gazebo_world_generator.src.placement.constraints import ConstraintValidator
 
 
 logger = logging.getLogger(__name__)
@@ -56,7 +60,26 @@ class NaturalPlacementEngine:
 
     def __init__(self, model_db, online_db=None, llm_interface=None,
                  placement_config: Optional[PlacementConfig] = None,
-                 room_config: Optional[RoomConfig] = None):
+                 room_config: Optional[RoomConfig] = None,
+                 spatial_registry: Optional[SpatialRegistry] = None,
+                 grid_strategy: Optional[GridPlacementStrategy] = None,
+                 wall_strategy: Optional[WallPlacementStrategy] = None,
+                 center_strategy: Optional[CenterPlacementStrategy] = None,
+                 constraint_validator: Optional[ConstraintValidator] = None):
+        """Initialize NaturalPlacementEngine with modular components.
+        
+        Args:
+            model_db: Model database for resolving models
+            online_db: Optional online database
+            llm_interface: LLM interface for intelligent placement
+            placement_config: Placement configuration
+            room_config: Room configuration
+            spatial_registry: Optional SpatialRegistry (creates default if None)
+            grid_strategy: Optional GridPlacementStrategy (creates default if None)
+            wall_strategy: Optional WallPlacementStrategy (creates default if None)
+            center_strategy: Optional CenterPlacementStrategy (creates default if None)
+            constraint_validator: Optional ConstraintValidator (creates default if None)
+        """
         self.model_db = model_db
         self.llm_interface = llm_interface
         self.sdf_extractor = SDFDimensionExtractor()
@@ -85,22 +108,28 @@ class NaturalPlacementEngine:
                 logger.warning(f"Failed to initialize PromptManager in NaturalPlacementEngine: {e}")
                 self.prompt_manager = None
 
-        # Cache for extracted model dimensions to avoid re-parsing
-        self.model_dimensions_cache = {}
-        self.model_offsets_cache = {}
-        self.object_sizes = {
-            'desk': (1.2, 0.6, 0.55), 'chair': (0.6, 0.6, 0.9),
-            'table': (1.5, 0.8, 0.75), 'shelf': (0.8, 0.3, 1.8),
-            'bookshelf': (0.8, 0.3, 1.8), 'monitor': (0.5, 0.2, 0.4),
-            'keyboard': (0.4, 0.15, 0.05), 'plant': (0.4, 0.4, 0.6), 'lamp': (0.4, 0.4, 1.5),
-            'storage_rack': (3.6, 0.6, 1.8), 'shelving_unit': (3.6, 0.6, 1.8),
-            'pallet': (1.2, 0.8, 0.144),
-            'bed': (2.0, 1.5, 0.5), 'nightstand': (0.5, 0.4, 0.5), 'wardrobe': (1.2, 0.6, 2.0),
-            'sofa': (2.0, 0.9, 0.8), 'couch': (2.0, 0.9, 0.8), 'tv_stand': (1.2, 0.4, 0.5),
-            'coffee_table': (1.0, 0.6, 0.4), 'dining_table': (1.5, 0.9, 0.75),
-            'dresser': (1.0, 0.5, 1.0), 'armchair': (0.8, 0.8, 0.9),
-            'default': (0.5, 0.5, 0.5)
-        }
+        # Initialize modular components
+        self.spatial_registry = spatial_registry if spatial_registry else SpatialRegistry(model_db, self.sdf_extractor)
+        
+        # Initialize strategies (create defaults if not provided via dependency injection)
+        # This ensures strategies are always available for use
+        if not grid_strategy:
+            grid_strategy = GridPlacementStrategy()
+        if not wall_strategy:
+            wall_strategy = WallPlacementStrategy()
+        if not center_strategy:
+            center_strategy = CenterPlacementStrategy()
+        
+        self.grid_strategy = grid_strategy
+        self.wall_strategy = wall_strategy
+        self.center_strategy = center_strategy
+        self.constraint_validator = constraint_validator if constraint_validator else ConstraintValidator()
+        
+        # Backward compatibility: Keep caches for legacy code  
+        # These delegate to SpatialRegistry
+        self.model_dimensions_cache = self.spatial_registry.model_dimensions_cache
+        self.model_offsets_cache = self.spatial_registry.model_offsets_cache
+        self.object_sizes = self.spatial_registry.default_sizes
 
         # Object orientation guidance - default facing directions and natural orientations
         self.object_orientations = {
@@ -245,6 +274,9 @@ class NaturalPlacementEngine:
     def get_actual_model_dimensions(self, object_type: str, model_name: str = None, room_type: str = None) -> Tuple[float, float, float]:
         """
         Get actual model dimensions from SDF files or fallback to hardcoded values.
+        
+        DEPRECATED: This method now delegates to SpatialRegistry for backward compatibility.
+        New code should use self.spatial_registry.get_dimensions() directly.
 
         Args:
             object_type: The object type (e.g., 'shelving_unit')
@@ -254,74 +286,14 @@ class NaturalPlacementEngine:
         Returns:
             Tuple of (width, length, height) in meters
         """
-        cache_key = f"{object_type}_{model_name or 'default'}_{room_type or 'default'}"
-
-        if cache_key in self.model_dimensions_cache:
-            return self.model_dimensions_cache[cache_key]
-
-        dimensions = None
-        resolved_model_name = model_name
-
-        if model_name:
-            try:
-                model_path = find_gazebo_model_path(model_name)
-                if model_path:
-                    # Try to get complete bounding box with offset
-                    bbox_result = self.sdf_extractor.extract_model_bounding_box(model_path)
-                    if bbox_result:
-                        dimensions, offset = bbox_result
-                        # Store with multiple cache keys for easier retrieval
-                        self.model_offsets_cache[cache_key] = offset
-                        simple_key = f"{object_type}_resolved"
-                        self.model_offsets_cache[simple_key] = offset
-                        simple_dim_key = f"{object_type}_default_{room_type or 'default'}"
-                        self.model_dimensions_cache[simple_dim_key] = dimensions
-                        logger.info(f"Extracted dims for '{model_name}': {dimensions}, offset: {offset}")
-                    else:
-                        dimensions = self.sdf_extractor.extract_model_dimensions(model_path)
-                        if dimensions:
-                            logger.info(f"Extracted dimensions for '{model_name}': {dimensions}")
-            except Exception as e:
-                logger.warning(f"Failed to extract dimensions for '{model_name}': {e}")
-
-        # If no specific model, try to find the best available model for this object type
-        if not dimensions and not model_name:
-            try:
-                best_model = self.model_db.find_best_model(object_type, room_type)
-                if best_model and best_model.startswith("model://"):
-                    resolved_model_name = best_model.replace("model://", "")
-                    model_path = find_gazebo_model_path(resolved_model_name)
-                    if model_path:
-                        # Try to get complete bounding box with offset
-                        bbox_result = self.sdf_extractor.extract_model_bounding_box(model_path)
-                        if bbox_result:
-                            dimensions, offset = bbox_result
-                            # Store with multiple cache keys for easier retrieval
-                            self.model_offsets_cache[cache_key] = offset
-                            simple_key = f"{object_type}_resolved"
-                            self.model_offsets_cache[simple_key] = offset
-                            simple_dim_key = f"{object_type}_default_{room_type or 'default'}"
-                            self.model_dimensions_cache[simple_dim_key] = dimensions
-                            logger.info(f"Extracted dims from '{resolved_model_name}' for '{object_type}': {dimensions}, offset: {offset}")
-                        else:
-                            dimensions = self.sdf_extractor.extract_model_dimensions(model_path)
-                            if dimensions:
-                                logger.info(f"Extracted dimensions from resolved model '{resolved_model_name}' for '{object_type}': {dimensions}")
-            except Exception as e:
-                logger.debug(f"Failed to resolve and extract dimensions for '{object_type}': {e}")
-
-        # Fallback to hardcoded values
-        if not dimensions:
-            dimensions = self.object_sizes.get(object_type, self.object_sizes['default'])
-            logger.debug(f"Using fallback dimensions for '{object_type}': {dimensions}")
-
-        # Cache the result
-        self.model_dimensions_cache[cache_key] = dimensions
-        return dimensions
+        return self.spatial_registry.get_dimensions(object_type, model_name, room_type)
 
     def get_effective_object_bounds(self, object_type: str, center_x: float, center_y: float, room_type: str = None, yaw: float = 0.0) -> Tuple[float, float, float, float]:
         """
         Get the effective bounding box of an object accounting for pose offsets and rotation.
+        
+        DEPRECATED: This method now delegates to SpatialRegistry for backward compatibility.
+        New code should use self.spatial_registry.get_effective_bounds() directly.
 
         Args:
             object_type: The object type
@@ -332,73 +304,7 @@ class NaturalPlacementEngine:
         Returns:
             Tuple of (min_x, max_x, min_y, max_y) - the actual space the object occupies
         """
-        import math
-
-        # Get the dimensions
-        dimensions = self.get_actual_model_dimensions(object_type, room_type=room_type)
-        half_w, half_l = dimensions[0] / 2, dimensions[1] / 2
-
-        # Get the bounding box offset (if available)
-        # Try to find the offset in cache - check multiple possible keys
-        offset = None
-
-        # Try different cache key formats
-        possible_keys = [
-            f"{object_type}_resolved",  # Simple key for resolved models
-            f"{object_type}_default_{room_type or 'default'}",  # Most common case
-            f"{object_type}_None_{room_type or 'default'}",
-            f"{object_type}_default_default",
-            f"{object_type}_None_default",
-        ]
-
-        logger.debug(f"Looking for offset for '{object_type}', room_type='{room_type}'")
-        logger.debug(f"Cache contents: {list(self.model_offsets_cache.keys())}")
-
-        for key in possible_keys:
-            if key in self.model_offsets_cache:
-                offset = self.model_offsets_cache[key]
-                logger.info(f"Found offset {offset} for '{object_type}' using cache_key: {key}")
-                break
-
-        if offset is None:
-            offset = (0, 0, 0)
-            logger.debug(f"No offset found for '{object_type}', using default (0, 0, 0)")
-
-        # Rotate the offset by the yaw angle
-        cos_yaw = math.cos(yaw)
-        sin_yaw = math.sin(yaw)
-        rotated_offset_x = offset[0] * cos_yaw - offset[1] * sin_yaw
-        rotated_offset_y = offset[0] * sin_yaw + offset[1] * cos_yaw
-
-        # Calculate the actual center of the bounding box after rotation
-        bbox_center_x = center_x + rotated_offset_x
-        bbox_center_y = center_y + rotated_offset_y
-
-        # When rotated, we need to compute the axis-aligned bounding box (AABB)
-        # For a rotated rectangle, we need to check all 4 corners
-        corners = [
-            (-half_w, -half_l),
-            (half_w, -half_l),
-            (-half_w, half_l),
-            (half_w, half_l)
-        ]
-
-        # Rotate each corner and find min/max
-        rotated_corners = []
-        for cx, cy in corners:
-            rx = cx * cos_yaw - cy * sin_yaw + bbox_center_x
-            ry = cx * sin_yaw + cy * cos_yaw + bbox_center_y
-            rotated_corners.append((rx, ry))
-
-        xs = [c[0] for c in rotated_corners]
-        ys = [c[1] for c in rotated_corners]
-
-        min_x = min(xs)
-        max_x = max(xs)
-        min_y = min(ys)
-        max_y = max(ys)
-
-        return (min_x, max_x, min_y, max_y)
+        return self.spatial_registry.get_effective_bounds(object_type, center_x, center_y, room_type, yaw)
 
     def place_objects_in_room(self, room: Room, world_map: str, objects_to_place: List[Dict], name_generator, room_number: int = 0, total_rooms: int = 0) -> List[GazeboModel]:
         """
@@ -968,6 +874,108 @@ Corrections JSON array (or []):"""
         
         return plan
 
+    def _apply_placement_strategies(self, plan: List[Dict], room: Room) -> List[Dict]:
+        """
+        Apply placement strategies to appropriate sections of the plan.
+        
+        Intelligently routes objects to Grid, Wall, or Center strategies based on:
+        - Object types and quantities
+        - Room characteristics
+        - Object grouping patterns
+        
+        Falls back to LLM placement for mixed or ungrouped objects.
+        """
+        if not plan:
+            return plan
+        
+        # Separate objects into strategy categories
+        wall_furniture = []
+        grid_candidates = []
+        other_objects = []
+        
+        # Wall furniture types that should snap to walls
+        WALL_TYPES = {'bookshelf', 'shelf', 'cabinet', 'shelving_unit', 'wardrobe', 'dresser', 'tv_stand'}
+        
+        # Group objects by type for grid detection
+        type_groups = {}
+        for item in plan:
+            obj_type = item['type'].lower()
+            base_type = obj_type.split('_')[0]  # Normalize (e.g., "desk_1" -> "desk")
+            
+            # Check if it's wall furniture
+            if any(wtype in obj_type for wtype in WALL_TYPES):
+                wall_furniture.append(item)
+            else:
+                # Group by base type for grid detection
+                if base_type not in type_groups:
+                    type_groups[base_type] = []
+                type_groups[base_type].append(item)
+        
+        # Apply Wall Strategy to wall furniture
+        if wall_furniture:
+            logger.info(f"  🏠 Wall strategy: Processing {len(wall_furniture)} wall furniture items")
+            try:
+                # Extract existing non-wall objects for collision avoidance
+                existing = [
+                    {
+                        'name': obj['type'],
+                        'position': (obj['pose']['x'], obj['pose']['y'], obj['pose'].get('yaw', 0.0)),
+                        'dimensions': self.get_actual_model_dimensions(obj['type'], room_type=room.type)
+                    }
+                    for obj in plan if obj not in wall_furniture
+                ]
+                
+                wall_placements = self.wall_strategy.place(wall_furniture, room, existing)
+                
+                # Update plan with wall placements
+                for orig_item, new_placement in zip(wall_furniture, wall_placements):
+                    orig_item['pose'].update(new_placement['pose'])
+                    orig_item['_strategy_applied'] = 'wall'
+                    
+                logger.info(f"    ✓ Positioned {len(wall_furniture)} items along walls")
+            except Exception as e:
+                logger.warning(f"    ⚠️ Wall strategy failed: {e}, keeping LLM placement")
+        
+        # Apply Grid Strategy to repetitive object groups (5+ similar objects)
+        for obj_type, items in type_groups.items():
+            if len(items) >= 5:
+                logger.info(f"  📐 Grid strategy: Processing {len(items)} {obj_type} objects")
+                try:
+                    # Build existing objects list
+                    existing = [
+                        {
+                            'name': obj['type'],
+                            'position': (obj['pose']['x'], obj['pose']['y'], obj['pose'].get('yaw', 0.0)),
+                            'dimensions': self.get_actual_model_dimensions(obj['type'], room_type=room.type)
+                        }
+                        for obj in plan if obj not in items
+                    ]
+                    
+                    grid_placements = self.grid_strategy.place(items, room, existing)
+                    
+                    # Update plan with grid placements
+                    for orig_item, new_placement in zip(items, grid_placements):
+                        orig_item['pose'].update(new_placement['pose'])
+                        orig_item['_strategy_applied'] = 'grid'
+                    
+                    logger.info(f"    ✓ Grid-positioned {len(items)} {obj_type} objects")
+                except Exception as e:
+                    logger.warning(f"    ⚠️ Grid strategy failed for {obj_type}: {e}, keeping LLM placement")
+            else:
+                # Not enough for grid strategy, keep LLM placement
+                other_objects.extend(items)
+        
+        # Log summary
+        strategy_counts = {
+            'wall': sum(1 for item in plan if item.get('_strategy_applied') == 'wall'),
+            'grid': sum(1 for item in plan if item.get('_strategy_applied') == 'grid'),
+            'llm': sum(1 for item in plan if not item.get('_strategy_applied'))
+        }
+        
+        logger.info(f"  📊 Strategy summary: {strategy_counts['wall']} wall, {strategy_counts['grid']} grid, {strategy_counts['llm']} LLM")
+        
+        return plan
+
     def _validate_and_correct_plan(self, plan: List[Dict], room: Room, model_info_cache: Dict[str, Dict] = None) -> List[Dict]:
         """
         Validate and correct placement plan in optimized order.
@@ -1002,13 +1010,9 @@ Corrections JSON array (or []):"""
             logger.info("🚪 Enforcing doorway clearance zones...")
             plan = self._enforce_doorway_clearance(plan, room)
 
-        # Optimize repetitive objects with grid positioning
-        logger.info("📊 Optimizing repetitive object layouts...")
-        plan = self._optimize_repetitive_objects(plan, room)
-
-        # Pre-collision wall snapping
-        logger.info("📍 Pre-collision wall snapping...")
-        plan = self._snap_wall_furniture_to_walls(plan, room)
+        # Apply intelligent placement strategies
+        logger.info("🎯 Applying intelligent placement strategies...")
+        plan = self._apply_placement_strategies(plan, room)
 
         # Main collision resolution
         logger.info("🔄 Collision resolution...")
