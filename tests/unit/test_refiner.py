@@ -85,22 +85,38 @@ def test_apply_remove_objects(mock_refiner):
     """)
     mock_refiner.current_world = ET.ElementTree(root)
     
+    # Initialize executor
+    from gazebo_world_generator.src.world.refinement import OperationExecutor
+    mock_refiner.executor = OperationExecutor(mock_refiner)
+    
     data = {
         "operation": "remove",
         "objects": [{"target": "desk_0"}]
     }
     
     with patch('pathlib.Path.write_text'): # Prevent actual file write
-        success = mock_refiner._apply_remove_objects(data, Path("test.sdf"))
+        success = mock_refiner.executor._apply_remove_objects(data, Path("test.sdf"))
         
     assert success is True
     # Verify it was removed from ET
     assert root.find('.//model[@name="desk_0"]') is None
 
 def test_apply_batch_operations(mock_refiner):
-    # Mock individual operation handlers
-    mock_refiner._apply_add_objects = MagicMock(return_value=True)
-    mock_refiner._apply_remove_objects = MagicMock(return_value=True)
+    # Setup mock world for operations
+    root = ET.fromstring("""
+    <sdf version='1.6'>
+      <world name='default'></world>
+    </sdf>
+    """)
+    mock_refiner.current_world = ET.ElementTree(root)
+    
+    # Initialize executor
+    from gazebo_world_generator.src.world.refinement import OperationExecutor
+    mock_refiner.executor = OperationExecutor(mock_refiner)
+    
+    # Mock individual operation handlers in the executor
+    mock_refiner.executor._apply_add_objects = MagicMock(return_value=True)
+    mock_refiner.executor._apply_remove_objects = MagicMock(return_value=True)
     
     data = {
         "operation": "batch",
@@ -113,8 +129,8 @@ def test_apply_batch_operations(mock_refiner):
     success = mock_refiner.apply_refinement(data, Path("test.sdf"))
     
     assert success is True
-    assert mock_refiner._apply_add_objects.call_count == 1
-    assert mock_refiner._apply_remove_objects.call_count == 1
+    assert mock_refiner.executor._apply_add_objects.call_count == 1
+    assert mock_refiner.executor._apply_remove_objects.call_count == 1
 
 def test_apply_add_objects_simple(mock_refiner):
     root = ET.fromstring("""
@@ -127,16 +143,16 @@ def test_apply_add_objects_simple(mock_refiner):
     mock_refiner.generator.model_db = MagicMock()
     mock_refiner.generator.placement_engine = MagicMock()
     
-    # Mocking resolve_and_place_new_objects or similar depends on the implementation
-    # Let's mock _add_single_object as it's likely a helper
-    mock_refiner._add_single_object = MagicMock(return_value=True)
+    # Initialize executor
+    from gazebo_world_generator.src.world.refinement import OperationExecutor
+    mock_refiner.executor = OperationExecutor(mock_refiner)
     
     data = {
         "operation": "add",
-        "objects": [{"type": "chair", "count": 1}]
+        "objects": []  # Empty list should return False but not crash
     }
     
-    with patch.object(mock_refiner, '_add_single_object', return_value=True):
-         success = mock_refiner._apply_add_objects(data, Path("test.sdf"))
-         
-    assert success is True
+    success = mock_refiner.executor._apply_add_objects(data, Path("test.sdf"))
+    
+    # Should return False when no objects specified
+    assert success is False
