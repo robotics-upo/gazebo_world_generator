@@ -7,6 +7,7 @@ import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional
+from gazebo_world_generator.src.config.settings import Config
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +24,10 @@ def find_gazebo_model_path(model_name: str) -> Optional[Path]:
     if not model_name or not model_name.strip():
         return None
     
-    search_paths = [
-        Path.home() / ".gazebo" / "models",
-        Path("/usr/share/gazebo/models"),
-        Path("/usr/share/gazebo-11/models"),
-    ]
+    search_paths = [Path(path).expanduser() for path in Config.GAZEBO_MODEL_PATHS]
+    for variable in ("GAZEBO_MODEL_PATH", "GZ_SIM_RESOURCE_PATH"):
+        search_paths.extend(Path(path).expanduser() for path in
+                            os.environ.get(variable, "").split(os.pathsep) if path)
 
     # First try: search by directory name (fast path)
     for base_path in search_paths:

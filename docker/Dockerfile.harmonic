@@ -1,0 +1,15 @@
+FROM ros:jazzy-ros-base
+SHELL ["/bin/bash", "-c"]
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip python3-pytest python3-colcon-common-extensions \
+    ros-jazzy-ros-gz \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /ws/src/gazebo_world_generator
+COPY requirements.txt requirements-dev.txt ./
+RUN PIP_BREAK_SYSTEM_PACKAGES=1 python3 -m pip install --no-cache-dir -r requirements-dev.txt
+COPY . .
+RUN PYTHONPATH=. python3 -m pytest -q tests
+WORKDIR /ws
+RUN source /opt/ros/jazzy/setup.bash && colcon build --packages-select gazebo_world_generator
+RUN source /opt/ros/jazzy/setup.bash && source install/setup.bash && \
+    colcon test --packages-select gazebo_world_generator && colcon test-result --verbose

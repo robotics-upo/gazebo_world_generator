@@ -6,55 +6,14 @@ and system constants used throughout the application.
 """
 
 import os
-import yaml
 from pathlib import Path
 from typing import Dict, List
+from gazebo_world_generator.src.config.validated_settings import ValidatedConfig
 
 # Load user configuration
 def load_config():
-    """Load configuration from YAML file."""
-    config_locations = []
-    
-    try:
-        # Try to import ament_index_python only if available
-        import importlib
-        ament_spec = importlib.util.find_spec("ament_index_python.packages")
-        if ament_spec is not None:
-            from ament_index_python.packages import get_package_share_directory
-            pkg_share = Path(get_package_share_directory('gazebo_world_generator'))
-            config_locations.append(pkg_share / "config" / "generator_config.yaml")
-        else:
-            # ament_index_python not available
-            pass
-    except Exception:
-        pass
-    
-    # Development/source location
-    config_locations.append(Path(__file__).parent.parent.parent.parent / "config" / "generator_config.yaml")
-    
-    # User home directory
-    config_locations.append(Path.home() / ".config" / "gazebo_world_generator" / "generator_config.yaml")
-    
-    # System-wide location
-    config_locations.append(Path("/etc/gazebo_world_generator/generator_config.yaml"))
-    
-    for config_path in config_locations:
-        if config_path.exists():
-            try:
-                with open(config_path, 'r') as f:
-                    return yaml.safe_load(f)
-            except Exception as e:
-                print(f"Warning: Failed to load config from {config_path}: {e}")
-    
-    # Fallback to defaults if no config file found
-    print("Warning: No config file found. Using hardcoded defaults.")
-    print(f"Searched locations: {[str(p) for p in config_locations]}")
-    return {
-        'llm': {
-            'server_url': 'http://localhost:1234/v1',
-            'model_name': 'default-model'
-        }
-    }
+    """Compatibility view of the shared validated settings loader."""
+    return ValidatedConfig.from_multiple_sources().to_dict()
 
 # Load configuration
 _config = load_config()

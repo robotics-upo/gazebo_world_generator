@@ -10,6 +10,9 @@ from typing import Dict, List, Optional
 from xml.dom import minidom
 import xml.etree.ElementTree as ET
 import math 
+import os
+import tempfile
+from pathlib import Path
 
 from gazebo_world_generator.src.llm.interface import OpenAICompatibleInterface as LLMInterface
 from gazebo_world_generator.src.core.data_models import Room, GazeboModel
@@ -36,8 +39,10 @@ class WorldGenerator:
         self.placement_config = self.config.placement
         self.physics_config = self.config.physics
 
-        self.online_db = OnlineModelDatabase(llm_interface=llm_interface)
-        self.model_db = SmartModelResolver(llm_interface=llm_interface, online_db=self.online_db)
+        self.online_db = OnlineModelDatabase(llm_interface=llm_interface, config=self.config.models)
+        self.model_db = SmartModelResolver(llm_interface=llm_interface, online_db=self.online_db,
+                                           search_paths=[*self.config.models.search_paths,
+                                                         self.config.models.cache_directory])
         self.placement_engine = NaturalPlacementEngine(
             model_db=self.model_db,
             llm_interface=llm_interface,
@@ -56,9 +61,18 @@ class WorldGenerator:
 
     def generate_world(self, description: str, output_path: str = "generated_world.sdf") -> str:
         """Generate a complete Gazebo world from a natural language description."""
+        self.rooms.clear()
+        self.models.clear()
+        self.model_counter.clear()
+        self.placement_engine.collision_detector = None
+        self.placement_engine._semantic_groups = None
+        if self.placement_config.random_seed is not None:
+            self.placement_engine.rng.seed(self.placement_config.random_seed)
         logger.debug(f"Generating world from description: '{description}'")
         
         parsed_data = self.llm_interface.parse_room_description(description, self.model_db)
+        if not isinstance(parsed_data, dict) or not isinstance(parsed_data.get("rooms"), list) or not parsed_data["rooms"]:
+            raise ValueError("LLM did not return a nonempty rooms list")
         logger.info(f"Parsed {len(parsed_data.get('rooms', []))} rooms from description.")
         
         logger.info("Creating room structure and layout...")
@@ -70,8 +84,22 @@ class WorldGenerator:
         logger.info("Generating walls and doorways...")
         sdf_content = self._generate_sdf()
 
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(sdf_content)
+        if not self._validate_sdf(sdf_content):
+            raise ValueError("Generated SDF is invalid")
+        destination = Path(output_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".sdf",
+                                             dir=destination.parent, delete=False) as handle:
+                temp_path = Path(handle.name)
+                handle.write(sdf_content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, destination)
+        finally:
+            if temp_path is not None and temp_path.exists():
+                temp_path.unlink()
         
         logger.info(f"World file generated at: {output_path}")
         
@@ -79,7 +107,7 @@ class WorldGenerator:
     
     def _calculate_room_dimensions(self, room_data: Dict) -> Dict:
         """Calculate room dimensions based on type and object requirements."""
-        dims = room_data.get("dimensions", {})
+        dims = dict(room_data.get("dimensions") or {})
         if room_data.get("type") == "corridor":
             dims.setdefault("width", self.placement_config.corridor_width)
             dims.setdefault("length", 8.0)
@@ -571,8 +599,15 @@ class WorldGenerator:
 
     def _populate_rooms(self):
         """Populate each room with objects using the placement engine."""
-        self.models.append(GazeboModel(name="ground_plane", model_path="model://ground_plane", category="ground",
-                                       pose={"x": 0, "y": 0, "z": 0, "roll": 0, "pitch": 0, "yaw": 0}, static=True))
+        min_x = min(room.position["x"] - room.dimensions["width"] / 2 for room in self.rooms)
+        max_x = max(room.position["x"] + room.dimensions["width"] / 2 for room in self.rooms)
+        min_y = min(room.position["y"] - room.dimensions["length"] / 2 for room in self.rooms)
+        max_y = max(room.position["y"] + room.dimensions["length"] / 2 for room in self.rooms)
+        self.models.append(GazeboModel(
+            name="ground_plane", model_path="built_in_wall", category="ground",
+            pose={"x": (min_x + max_x) / 2, "y": (min_y + max_y) / 2,
+                  "z": -0.02, "roll": 0, "pitch": 0, "yaw": 0},
+            size=[max_x - min_x + 2, max_y - min_y + 2, 0.04], static=True))
         
         for room in self.rooms:
             if room.objects:
@@ -1024,16 +1059,16 @@ class WorldGenerator:
         world = ET.SubElement(sdf, "world", name="generated_world")
         
         # Add Header (GUI, Physics, Scene, Light)
-        world.append(ET.fromstring('''
-        <gui>
-          <camera name="user_camera"><pose>7.1031 -0.036058 23.3852 0 1.239 3.1267</pose></camera>
-        </gui>'''))
-        world.append(ET.fromstring('''
-        <physics type="ode" name="default_physics">
-          <gravity>0 0 -9.8</gravity>
-          <real_time_update_rate>1000</real_time_update_rate>
-          <max_step_size>0.001</max_step_size>
-        </physics>'''))
+        if self.config.simulator == "classic":
+            world.append(ET.fromstring('''
+            <gui>
+              <camera name="user_camera"><pose>7.1031 -0.036058 23.3852 0 1.239 3.1267</pose></camera>
+            </gui>'''))
+        physics = ET.SubElement(world, "physics", type=self.physics_config.engine,
+                                name="default_physics")
+        ET.SubElement(world, "gravity").text = f"0 0 {self.physics_config.gravity}"
+        ET.SubElement(physics, "real_time_update_rate").text = str(self.physics_config.real_time_update_rate)
+        ET.SubElement(physics, "max_step_size").text = str(self.physics_config.max_step_size)
         world.append(ET.fromstring('''
         <scene>
           <ambient>0.4 0.4 0.4 1</ambient>
@@ -1077,8 +1112,11 @@ class WorldGenerator:
                 box_geom_v = ET.SubElement(ET.SubElement(visual, "geometry"), "box")
                 ET.SubElement(box_geom_v, "size").text = size_str
                 mat = ET.SubElement(visual, "material")
-                script = ET.SubElement(mat, "script")
-                ET.SubElement(script, "name").text = "Gazebo/Grey"
+                if self.config.simulator == "classic":
+                    script = ET.SubElement(mat, "script")
+                    ET.SubElement(script, "name").text = "Gazebo/Grey"
+                else:
+                    ET.SubElement(mat, "diffuse").text = "0.5 0.5 0.5 1"
 
                 # Collision with surface properties
                 collision = ET.SubElement(link, "collision", name="wall_collision")
@@ -1096,22 +1134,24 @@ class WorldGenerator:
         return dom.toprettyxml(indent="  ")
 
     def _validate_sdf(self, sdf_content: str) -> bool:
-        """Basic XML validation for the generated SDF content."""
+        """Check the world structure before atomically publishing the SDF."""
         try:
-            ET.fromstring(sdf_content)
+            root = ET.fromstring(sdf_content)
+            if root.tag != "sdf" or root.find("world") is None:
+                raise ValueError("Missing SDF world")
+            world = root.find("world")
+            names = [element.get("name") for element in world.findall("model")]
+            names += [element.findtext("name") for element in world.findall("include")]
+            if any(not name for name in names) or len(names) != len(set(names)):
+                raise ValueError("SDF model names must be nonempty and unique")
+            for size in world.findall(".//box/size"):
+                if size.text is None or len(size.text.split()) != 3 or any(
+                    not math.isfinite(float(value)) or float(value) <= 0
+                    for value in size.text.split()
+                ):
+                    raise ValueError("Invalid SDF box dimensions")
             logger.info("Generated SDF content is well-formed XML.")
             return True
-        except ET.ParseError as e:
+        except (ET.ParseError, ValueError) as e:
             logger.error(f"SDF Validation Error: Failed to parse XML. Details: {e}")
             return False
-
-    def _print_summary(self, output_path: str):
-        """Prints a summary of the generated world."""
-        print("\n✓ World generated successfully!")
-        print(f"  File: {output_path}")
-        print(f"  Rooms: {len(self.rooms)}")
-        print(f"  Total objects: {sum(1 for m in self.models if m.category != 'structure' and m.name != 'ground_plane')}")
-        for room in self.rooms:
-            obj_count = sum(1 for m in self.models if getattr(m, 'room', None) == room.name and m.category != "structure")
-            print(f"    • {room.name} ({room.type}): {obj_count} objects")
-        print(f"\nRun with: gazebo {output_path}")

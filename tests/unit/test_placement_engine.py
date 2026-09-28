@@ -4,6 +4,38 @@ from unittest.mock import MagicMock, patch
 from gazebo_world_generator.src.placement.engine import NaturalPlacementEngine
 from gazebo_world_generator.src.core.data_models import Room
 
+
+def test_missing_requested_model_fails_generation():
+    database = MagicMock()
+    database.find_best_model.return_value = None
+    engine = NaturalPlacementEngine(model_db=database)
+    room = Room(name="Office", type="office",
+                dimensions={"width": 6, "length": 5, "height": 3},
+                position={"x": 0, "y": 0, "z": 0})
+    plan = [{"type": "desk", "pose": {"x": 0, "y": 0, "z": 0}}]
+    with pytest.raises(ValueError, match="No visible model found"):
+        engine._create_models_from_plan(plan, room, lambda name: name + "_0")
+
+
+def test_repetitive_objects_use_grid_strategy_without_overlap():
+    engine = NaturalPlacementEngine(model_db=MagicMock())
+    engine.get_actual_model_dimensions = MagicMock(return_value=(0.8, 0.4, 1.8))
+    room = Room(name="Warehouse", type="warehouse",
+                dimensions={"width": 10, "length": 10, "height": 3},
+                position={"x": 0, "y": 0, "z": 0})
+    plan = [{"type": "storage_rack", "unique_name": f"rack_{index}",
+             "pose": {"x": 0, "y": 0, "z": 0, "yaw": 0}}
+            for index in range(6)]
+
+    placed = engine._apply_placement_strategies(plan, room)
+
+    assert len(placed) == 6
+    assert all(item.get("_strategy_applied") == "grid" for item in placed)
+    positions = [(item["pose"]["x"], item["pose"]["y"]) for item in placed]
+    assert all(abs(x1 - x2) >= 0.8 or abs(y1 - y2) >= 0.4
+               for index, (x1, y1) in enumerate(positions)
+               for x2, y2 in positions[index + 1:])
+
 def test_resolve_models_early():
     model_db = MagicMock()
     # Mock model_db.find_best_model
@@ -27,8 +59,8 @@ def test_get_effective_object_bounds():
     model_db = MagicMock()
     engine = NaturalPlacementEngine(model_db=model_db)
     
-    # Mock get_actual_model_dimensions
-    with patch.object(NaturalPlacementEngine, 'get_actual_model_dimensions', return_value=(2.0, 1.0, 0.5)):
+    # Effective bounds now delegate to the spatial registry.
+    with patch.object(engine.spatial_registry, 'get_dimensions', return_value=(2.0, 1.0, 0.5)):
         # x, y = 0, 0. yaw = 0. bounds should be (-1, 1, -0.5, 0.5)
         bounds = engine.get_effective_object_bounds("test_obj", 0.0, 0.0, yaw=0.0)
         assert bounds == (-1.0, 1.0, -0.5, 0.5)

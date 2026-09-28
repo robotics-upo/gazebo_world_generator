@@ -9,6 +9,7 @@ import os
 import logging
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
+from gazebo_world_generator.src.models.visual_quality import inspect_model_visuals
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,17 @@ class SDFDimensionExtractor:
             if dimensions:
                 logger.info(f"Extracted visual dimensions from {sdf_path}: {dimensions}")
                 return dimensions
+
+            # Mesh-only SDFs are common. Measure their vertices instead of
+            # guessing a size from a misleading model name.
+            inspection = inspect_model_visuals(Path(sdf_path).parent)
+            if inspection.dimensions:
+                logger.info("Extracted mesh dimensions from %s: %s", sdf_path,
+                            inspection.dimensions)
+                return inspection.dimensions
+            if inspection.error:
+                logger.warning("Cannot measure %s: %s", sdf_path, inspection.error)
+                return None
 
             # Final fallback: use model name to guess dimensions
             model_name = os.path.basename(str(model_path).rstrip('/'))

@@ -16,7 +16,9 @@ Usage:
 """
 
 import json
-import pickle
+import os
+import tempfile
+import math
 import hashlib
 import logging
 import time
@@ -27,6 +29,8 @@ from datetime import datetime, timedelta
 from threading import RLock
 from collections import OrderedDict
 from functools import wraps
+
+from gazebo_world_generator.src.resources import user_state_dir
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +297,7 @@ class PersistentCache(Cache):
         """
         super().__init__(name, max_size, default_ttl)
 
-        self.cache_dir = cache_dir or Path.home() / ".gazebo_world_generator" / "cache"
+        self.cache_dir = cache_dir or user_state_dir() / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.auto_save = auto_save
@@ -310,7 +314,7 @@ class PersistentCache(Cache):
     @property
     def cache_file(self) -> Path:
         """Get cache file path."""
-        return self.cache_dir / f"{self.name}.cache"
+        return self.cache_dir / f"{self.name}.json"
 
     def set(self, key: str, value: Any, ttl: Optional[float] = None):
         """Set value with optional auto-save."""
@@ -325,8 +329,25 @@ class PersistentCache(Cache):
         """Save cache to disk."""
         try:
             with self._lock:
-                with open(self.cache_file, 'wb') as f:
-                    pickle.dump(dict(self._cache), f)
+                entries = [{"key": key, "value": entry.value,
+                            "created_at": entry.created_at, "last_accessed": entry.last_accessed,
+                            "access_count": entry.access_count, "ttl": entry.ttl}
+                           for key, entry in self._cache.items()]
+                payload = json.dumps({"version": 1, "entries": entries}, allow_nan=False,
+                                     default=lambda value: sorted(value) if isinstance(value, set) else
+                                     (_ for _ in ()).throw(TypeError("Non-JSON cache value")))
+                temp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=self.cache_dir,
+                                                     delete=False) as handle:
+                        temp_path = Path(handle.name)
+                        handle.write(payload)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(temp_path, self.cache_file)
+                finally:
+                    if temp_path is not None and temp_path.exists():
+                        temp_path.unlink()
                 logger.debug(
                     f"Saved cache '{self.name}' to disk ({len(self._cache)} entries)"
                 )
@@ -339,19 +360,36 @@ class PersistentCache(Cache):
             return
 
         try:
-            with open(self.cache_file, 'rb') as f:
-                loaded_cache = pickle.load(f)
-
-            # Filter expired entries
-            valid_entries = {
-                key: entry for key, entry in loaded_cache.items()
-                if not entry.is_expired()
-            }
+            if self.cache_file.stat().st_size > 10_000_000:
+                raise ValueError("Cache file exceeds size limit")
+            payload = json.loads(self.cache_file.read_text(encoding="utf-8"),
+                                 parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+            if not isinstance(payload, dict) or payload.get("version") != 1 or not isinstance(payload.get("entries"), list):
+                raise ValueError("Unsupported cache format")
+            if len(payload["entries"]) > self.max_size:
+                raise ValueError("Too many cache entries")
+            valid_entries = {}
+            for item in payload["entries"]:
+                if not isinstance(item, dict) or not isinstance(item.get("key"), str):
+                    raise ValueError("Invalid cache entry")
+                created_at = float(item["created_at"])
+                last_accessed = float(item["last_accessed"])
+                access_count = int(item["access_count"])
+                ttl = None if item["ttl"] is None else float(item["ttl"])
+                if (not math.isfinite(created_at) or not math.isfinite(last_accessed) or
+                        created_at < 0 or last_accessed < created_at or access_count < 0 or
+                        (ttl is not None and (not math.isfinite(ttl) or ttl < 0))):
+                    raise ValueError("Invalid cache metadata")
+                entry = CacheEntry(value=item["value"], created_at=float(item["created_at"]),
+                                   last_accessed=last_accessed,
+                                   access_count=access_count, ttl=ttl)
+                if not entry.is_expired():
+                    valid_entries[item["key"]] = entry
 
             self._cache = OrderedDict(valid_entries)
             logger.info(
                 f"Loaded cache '{self.name}' from disk "
-                f"({len(self._cache)}/{len(loaded_cache)} entries valid)"
+                f"({len(self._cache)}/{len(payload['entries'])} entries valid)"
             )
         except Exception as e:
             logger.error(f"Failed to load cache '{self.name}': {e}")

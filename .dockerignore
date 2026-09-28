@@ -1,0 +1,10 @@
+# Dotfiles (.git, tool state, caches) and local build/output artifacts
+.*
+**/__pycache__
+build
+install
+log
+generated_worlds
+media
+AGENTS.md
+CLAUDE.md

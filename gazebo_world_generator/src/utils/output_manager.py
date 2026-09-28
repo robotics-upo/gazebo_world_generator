@@ -22,7 +22,7 @@ class OutputManager:
         Args:
             base_output_dir: Base directory for outputs. Defaults to 'generated_worlds' in current directory.
         """
-        self.base_output_dir = base_output_dir or Path.cwd() / "generated_worlds"
+        self.base_output_dir = Path(base_output_dir or Path.cwd() / "generated_worlds").expanduser()
         self.base_output_dir.mkdir(parents=True, exist_ok=True)
 
         self.worlds_dir = self.base_output_dir / "worlds"
@@ -46,7 +46,7 @@ class OutputManager:
             Dictionary with 'world_file', 'log_file', and 'world_name' keys.
         """
         if world_name is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             world_name = f"world_{timestamp}"
         else:
             world_name = Path(world_name).stem

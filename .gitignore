@@ -37,3 +37,8 @@ prompts/.metrics.json
 # Temporary files
 *.tmp
 *.bak
+.ci/
+
+# Test and tooling artifacts
+.coverage
+.deepeval/

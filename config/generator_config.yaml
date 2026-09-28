@@ -49,6 +49,9 @@ output:
   # Automatically generate occupancy maps for navigation
   auto_generate_map: true
 
+# Selects Classic on Humble and Harmonic on Jazzy; set a value to override.
+simulator: null
+
 # -----------------------------------------------------------------------------
 # Model Resolution Configuration
 # -----------------------------------------------------------------------------
@@ -69,6 +72,14 @@ models:
   # Online model resolution settings
   max_concurrent_downloads: 3
   max_search_results: 15
+  max_archive_bytes: 100000000
+  allowed_providers:
+    - "fuel.gazebosim.org"
+    - "fuel.ignitionrobotics.org"
+    - "github.com"
+    - "api.github.com"
+    - "raw.githubusercontent.com"
+    - "codeload.github.com"
 
 # -----------------------------------------------------------------------------
 # Placement Configuration
@@ -90,6 +101,9 @@ placement:
   
   # Width of traffic corridors between furniture (meters)
   corridor_width: 1.2
+  # Conservative context budgeting without a downloaded tokenizer
+  chars_per_token: 3.0
+  random_seed: null
 
 # -----------------------------------------------------------------------------
 # Room Configuration

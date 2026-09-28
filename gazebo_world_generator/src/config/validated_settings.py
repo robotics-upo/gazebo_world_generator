@@ -5,6 +5,7 @@ This module provides type-safe, validated configuration models that replace
 the previous dictionary-based configuration system.
 """
 
+import json
 import os
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
@@ -17,6 +18,7 @@ from gazebo_world_generator.src.exceptions import (
     InvalidConfigError,
     MissingConfigError
 )
+from gazebo_world_generator.src.resources import find_data_path
 
 
 # =============================================================================
@@ -87,6 +89,9 @@ class LLMConfig(BaseModel):
 
 class PlacementConfig(BaseModel):
     """Object placement configuration with validation."""
+
+    chars_per_token: float = Field(default=3.0, ge=1.0, le=8.0)
+    random_seed: Optional[int] = None
 
     grid_resolution: float = Field(
         default=0.25,
@@ -223,6 +228,32 @@ class PhysicsConfig(BaseModel):
 # Main Configuration
 # =============================================================================
 
+class OutputConfig(BaseModel):
+    base_directory: Path = Path("generated_worlds")
+    auto_generate_map: bool = True
+
+
+class ModelsConfig(BaseModel):
+    search_paths: List[Path] = Field(default_factory=lambda: [
+        Path("~/.gazebo/models"), Path("/usr/share/gazebo-11/models"),
+        Path("/usr/local/share/gazebo-11/models")
+    ])
+    cache_directory: Path = Path("~/.gazebo/models")
+    max_concurrent_downloads: int = Field(default=3, ge=1)
+    max_search_results: int = Field(default=15, ge=1)
+    allowed_providers: List[str] = Field(default_factory=lambda: [
+        "fuel.gazebosim.org", "fuel.ignitionrobotics.org",
+        "github.com", "api.github.com", "raw.githubusercontent.com",
+        "codeload.github.com"
+    ])
+    max_archive_bytes: int = Field(default=100_000_000, gt=0)
+
+
+class LogSettings(BaseModel):
+    level: str = "INFO"
+    modules: Dict[str, str] = Field(default_factory=dict)
+
+
 class ValidatedConfig(BaseSettings):
     """
     Main validated configuration class.
@@ -235,12 +266,22 @@ class ValidatedConfig(BaseSettings):
     placement: PlacementConfig = Field(default_factory=PlacementConfig)
     rooms: RoomConfig = Field(default_factory=RoomConfig)
     physics: PhysicsConfig = Field(default_factory=PhysicsConfig)
+    output: OutputConfig = Field(default_factory=OutputConfig)
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
+    logging: LogSettings = Field(default_factory=LogSettings)
+    simulator: Optional[Literal["classic", "harmonic"]] = None
 
     model_config = {
         "env_prefix": "GAZEBO_WORLD_GEN_",
         "env_nested_delimiter": "__",
         "case_sensitive": False
     }
+
+    @model_validator(mode="after")
+    def select_simulator(self) -> "ValidatedConfig":
+        if self.simulator is None:
+            self.simulator = "harmonic" if os.environ.get("ROS_DISTRO") == "jazzy" else "classic"
+        return self
 
     @classmethod
     def from_yaml(cls, config_path: Path) -> "ValidatedConfig":
@@ -270,100 +311,53 @@ class ValidatedConfig(BaseSettings):
             )
 
         try:
-            return cls(**config_dict)
+            return cls(**(config_dict or {}))
         except Exception as e:
             raise ConfigValidationError(
                 f"Configuration validation failed: {e}"
             )
 
     @classmethod
-    def from_multiple_sources(cls) -> "ValidatedConfig":
-        """
-        Load configuration from multiple sources in priority order.
+    def from_multiple_sources(cls, cli_overrides: Optional[dict] = None) -> "ValidatedConfig":
+        """Merge defaults, packaged YAML, user YAML, environment, then CLI values."""
+        merged = {}
 
-        Priority order:
-        1. Environment variables (highest priority)
-        2. ROS2 package share directory
-        3. Development directory (./config/)
-        4. User home (~/.config/gazebo_world_generator/)
-        5. System-wide (/etc/gazebo_world_generator/)
-        6. Default values (lowest priority)
+        def merge(target, source):
+            for key, value in source.items():
+                if isinstance(value, dict) and isinstance(target.get(key), dict):
+                    merge(target[key], value)
+                else:
+                    target[key] = value
 
-        Returns:
-            Validated configuration instance
-        """
-        config_locations = []
-
-        # Try ROS2 package share directory
-        try:
-            from ament_index_python.packages import get_package_share_directory
-            pkg_share = Path(get_package_share_directory('gazebo_world_generator'))
-            config_locations.append(pkg_share / "config" / "generator_config.yaml")
-        except Exception:
-            pass
-
-        # Development directory (relative to this file)
-        config_locations.append(
-            Path(__file__).parent.parent.parent.parent / "config" / "generator_config.yaml"
-        )
-
-        # User home directory
-        config_locations.append(
-            Path.home() / ".config" / "gazebo_world_generator" / "generator_config.yaml"
-        )
-
-        # System-wide location
-        config_locations.append(
-            Path("/etc/gazebo_world_generator/generator_config.yaml")
-        )
-
-        # Try each location
-        for config_path in config_locations:
-            if config_path.exists():
+        packaged_path = find_data_path("config/generator_config.yaml")
+        user_path = (Path.home() / ".config" / "gazebo_world_generator"
+                     / "generator_config.yaml")
+        for path in (packaged_path, user_path):
+            if path is not None and path.exists():
                 try:
-                    return cls.from_yaml(config_path)
-                except Exception as e:
-                    # Log warning but continue to next location
-                    print(f"Warning: Failed to load config from {config_path}: {e}")
+                    content = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                    if not isinstance(content, dict):
+                        raise InvalidConfigError("YAML root must be a mapping")
+                    merge(merged, content)
+                except Exception as exc:
+                    raise InvalidConfigError(f"Failed to load {path}: {exc}") from exc
 
-        # Fall back to defaults with environment variable overrides
-        print("Warning: No config file found. Using defaults with environment overrides.")
-        return cls()
-
-    def validate_for_generation(self, description: str, num_rooms: int, total_objects: int):
-        """
-        Validate that a generation request is within resource limits.
-
-        Args:
-            description: World description
-            num_rooms: Number of rooms
-            total_objects: Total number of objects
-
-        Raises:
-            ResourceLimitExceededError: If limits are exceeded
-        """
-        from gazebo_world_generator.src.exceptions import ResourceLimitExceededError
-
-        if len(description) > self.resource_limits.max_description_length:
-            raise ResourceLimitExceededError(
-                "description_length",
-                len(description),
-                self.resource_limits.max_description_length
-            )
-
-        if num_rooms > self.resource_limits.max_rooms:
-            raise ResourceLimitExceededError(
-                "rooms",
-                num_rooms,
-                self.resource_limits.max_rooms
-            )
-
-        if total_objects > self.resource_limits.max_total_objects:
-            raise ResourceLimitExceededError(
-                "total_objects",
-                total_objects,
-                self.resource_limits.max_total_objects
-            )
+        prefix = "GAZEBO_WORLD_GEN_"
+        for key, raw in os.environ.items():
+            if not key.startswith(prefix):
+                continue
+            parts = key[len(prefix):].lower().split("__")
+            try:
+                value = json.loads(raw)
+            except json.JSONDecodeError:
+                value = raw
+            node = merged
+            for part in parts[:-1]:
+                node = node.setdefault(part, {})
+            node[parts[-1]] = value
+        if cli_overrides:
+            merge(merged, cli_overrides)
+        return cls(**merged)
 
     def to_dict(self) -> dict:
         """Export configuration as dictionary with Path objects converted to strings."""

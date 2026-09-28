@@ -14,6 +14,12 @@ import zipfile
 import tarfile
 import tempfile
 import shutil
+import stat
+import xml.etree.ElementTree as ET
+import uuid
+from urllib.parse import urlparse
+
+from gazebo_world_generator.src.config.validated_settings import ModelsConfig
 
 from gazebo_world_generator.src.config.settings import Config
 from gazebo_world_generator.src.prompts.manager import PromptManager
@@ -27,8 +33,9 @@ class OnlineModelDatabase:
     Interface for querying and downloading models from online Gazebo repositories.
     """
 
-    def __init__(self, llm_interface=None):
+    def __init__(self, llm_interface=None, config: Optional[ModelsConfig] = None):
         self.llm = llm_interface
+        self.config = config or ModelsConfig()
         self.search_cache: Dict[str, List[Dict]] = {}
         
         # Initialize PromptManager
@@ -44,7 +51,7 @@ class OnlineModelDatabase:
             except Exception as e:
                 logger.warning(f"Failed to initialize PromptManager in OnlineModelDatabase: {e}")
                 self.prompt_manager = None
-        self.local_model_path = Path.home() / ".gazebo" / "models"
+        self.local_model_path = self.config.cache_directory.expanduser()
         self.local_model_path.mkdir(parents=True, exist_ok=True)
         
         logger.debug("Online Model Database initialized with caching and parallel search.")
@@ -321,19 +328,36 @@ class OnlineModelDatabase:
         """Download and extract a model, handling various archive types and structures."""
         model_name = model_info.get("name")
         download_url = model_info.get("download_url")
+        if (not isinstance(model_name, str) or model_name in {"", ".", ".."} or
+                Path(model_name).name != model_name or "\\" in model_name):
+            raise ValueError("Invalid model name")
+        if not self._allowed_download_url(download_url):
+            raise ValueError("Model download provider is not allowed")
         destination_path = self.local_model_path / model_name
+        if destination_path.is_symlink():
+            raise ValueError("Model destination must not be a symbolic link")
 
-        if destination_path.is_dir() and (destination_path / "model.sdf").is_file():
-            logger.info(f"Model '{model_name}' already exists. Skipping download.")
-            return destination_path
+        if destination_path.is_dir():
+            try:
+                self._validate_model_directory(destination_path)
+            except (ValueError, OSError) as exc:
+                logger.warning(f"Existing model '{model_name}' is invalid: {exc}")
+            else:
+                logger.info(f"Model '{model_name}' already exists. Skipping download.")
+                return destination_path
 
         logger.info(f"Downloading '{model_name}' from {download_url}...")
         
-        headers = {'Authorization': f'token {os.getenv("GITHUB_TOKEN")}'} if 'github.com' in download_url else {}
+        github_token = os.getenv("GITHUB_TOKEN")
+        headers = ({'Authorization': f'token {github_token}'}
+                   if github_token and urlparse(download_url).hostname in
+                   {'github.com', 'api.github.com', 'codeload.github.com'} else {})
         response = self._make_request_with_retry(download_url, headers=headers, stream=True)
         if not response:
             logger.error(f"Failed to download '{model_name}' after multiple retries.")
             return None
+        if not self._allowed_download_url(getattr(response, "url", download_url)):
+            raise ValueError("Model download redirected to an unapproved provider")
 
         suffix = ".zip"
         if "zipball" in download_url:
@@ -342,40 +366,125 @@ class OnlineModelDatabase:
             suffix = ".tar.gz"
 
         with tempfile.NamedTemporaryFile(suffix=suffix) as tmp_file:
+            total_downloaded = 0
             for chunk in response.iter_content(chunk_size=8192):
+                total_downloaded += len(chunk)
+                if total_downloaded > self.config.max_archive_bytes:
+                    raise ValueError("Model archive exceeds size limit")
                 tmp_file.write(chunk)
             tmp_file.seek(0)
             
             logger.info("Download complete. Extracting archive...")
-            if destination_path.exists(): shutil.rmtree(destination_path)
-
-            with tempfile.TemporaryDirectory() as extract_dir_str:
+            with tempfile.TemporaryDirectory(dir=self.local_model_path) as extract_dir_str:
                 extract_dir = Path(extract_dir_str)
                 try:
                     if suffix == ".zip":
                         with zipfile.ZipFile(tmp_file.name) as zf:
+                            members = zf.infolist()
+                            self._validate_archive_members(
+                                [(m.filename, m.file_size,
+                                  stat.S_ISLNK((m.external_attr >> 16) & 0xffff)) for m in members])
                             zf.extractall(extract_dir)
                     elif suffix == ".tar.gz":
                         with tarfile.open(tmp_file.name, "r:gz") as tf:
-                            tf.extractall(extract_dir)
+                            members = tf.getmembers()
+                            self._validate_archive_members(
+                                [(m.name, m.size, m.issym() or m.islnk() or
+                                  not (m.isfile() or m.isdir())) for m in members])
+                            for member in members:
+                                tf.extract(member, extract_dir)
                     else:
                         logger.error(f"Unsupported archive type for {model_name}")
                         return None
-                except (zipfile.BadZipFile, tarfile.ReadError) as e:
+                except (zipfile.BadZipFile, tarfile.TarError) as e:
                     logger.error(f"Failed to extract archive for {model_name}: {e}")
                     return None
 
                 model_sdf_path = None
+                target_path = model_info.get("path_in_repo")
                 for potential_path in extract_dir.rglob("model.sdf"):
+                    if target_path and not str(potential_path.parent).endswith(target_path):
+                        continue
                     model_sdf_path = potential_path
                     break
 
                 if model_sdf_path:
                     source_model_dir = model_sdf_path.parent
-                    shutil.move(source_model_dir, destination_path)
+                    self._validate_model_directory(source_model_dir)
+                    nonce = uuid.uuid4().hex
+                    staged = self.local_model_path / f".{model_name}.{nonce}.staged"
+                    shutil.move(source_model_dir, staged)
+                    backup = self.local_model_path / f".{model_name}.{nonce}.backup"
+                    try:
+                        if destination_path.exists():
+                            os.replace(destination_path, backup)
+                        os.replace(staged, destination_path)
+                    except Exception:
+                        if backup.exists() and not destination_path.exists():
+                            os.replace(backup, destination_path)
+                        raise
+                    finally:
+                        if backup.exists() and destination_path.exists():
+                            if backup.is_dir():
+                                shutil.rmtree(backup)
+                            else:
+                                backup.unlink()
                     logger.info(f"✅ Successfully downloaded and verified model '{model_name}'.")
                     return destination_path
                 else:
                     logger.error(f"Extraction failed: 'model.sdf' not found for '{model_name}'.")
-                    if destination_path.exists(): shutil.rmtree(destination_path)
                     return None
+
+    def _allowed_download_url(self, url: str) -> bool:
+        parsed = urlparse(url) if isinstance(url, str) else None
+        return bool(parsed and parsed.scheme == "https" and
+                    parsed.hostname in self.config.allowed_providers)
+
+    @staticmethod
+    def _validate_model_sdf(path: Path):
+        root = ET.parse(path).getroot()
+        model = root.find("model")
+        if (root.tag != "sdf" or not root.get("version") or model is None or
+                not model.get("name") or not any(
+                    model.find(tag) is not None for tag in ("link", "include", "model"))):
+            raise ValueError("model.sdf is not a valid model")
+
+    def _validate_model_directory(self, directory: Path) -> None:
+        try:
+            self._validate_model_sdf(directory / "model.sdf")
+            config_file = directory / "model.config"
+            if not config_file.is_file():
+                raise ValueError("Missing model.config")
+            config_root = ET.parse(config_file).getroot()
+            if (config_root.tag != "model" or not config_root.findtext("name") or
+                    not config_root.findtext("sdf")):
+                raise ValueError("Missing or invalid model.config")
+            for sdf_entry in config_root.findall("sdf"):
+                referenced = sdf_entry.text
+                if not referenced:
+                    raise ValueError("Empty SDF reference in model.config")
+                relative = Path(referenced)
+                if relative.is_absolute() or ".." in relative.parts or "\\" in referenced:
+                    raise ValueError("Unsafe SDF reference in model.config")
+                referenced_file = directory / relative
+                if not referenced_file.is_file():
+                    raise ValueError("Invalid SDF reference in model.config")
+                self._validate_model_sdf(referenced_file)
+            from gazebo_world_generator.src.models.visual_quality import inspect_model_visuals
+            inspection = inspect_model_visuals(directory)
+            if inspection.error:
+                raise ValueError(f"Invalid model visual: {inspection.error}")
+        except (ET.ParseError, OSError) as exc:
+            raise ValueError("Invalid model XML") from exc
+
+    def _validate_archive_members(self, members):
+        if len(members) > 10_000:
+            raise ValueError("Too many model archive members")
+        total_size = 0
+        for name, size, is_link in members:
+            path = Path(name)
+            if not name or "\\" in name or path.is_absolute() or ".." in path.parts or is_link:
+                raise ValueError("Unsafe model archive member")
+            total_size += size
+            if total_size > self.config.max_archive_bytes:
+                raise ValueError("Extracted model exceeds size limit")

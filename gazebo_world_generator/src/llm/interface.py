@@ -518,7 +518,10 @@ class OpenAICompatibleInterface(LLMBase):
         # Pattern 1: "WxL RoomType" format (e.g., "12m x 10m office", "10x8 warehouse")
         # Handles: "12m x 10m office", "10 x 8 office", "5mx4m room", etc.
         # Match dimensions (with optional 'm' attached to each number) followed by room type
-        pattern1 = r'(\d+\.?\d*)m?\s*[x×X]\s*(\d+\.?\d*)m?(?:\s*[x×X]\s*(\d+\.?\d*)m?)?\s+(\w+)'
+        # A unit "m" may follow a space ("8 x 6 m office") or touch the next "x" ("5mx4m").
+        unit = r'\s*(?:m(?![a-wyz]))?'
+        pattern1 = (rf'(\d+\.?\d*){unit}\s*[x×X]\s*(\d+\.?\d*){unit}'
+                    rf'(?:\s*[x×X]\s*(\d+\.?\d*){unit})?\s+(\w+)')
         matches1 = re.finditer(pattern1, description, re.IGNORECASE)
         for match in matches1:
             width = float(match.group(1))
@@ -562,8 +565,10 @@ class OpenAICompatibleInterface(LLMBase):
             hints.append(hint)
             logger.info(f"Found dimension hint (pattern2): {hint}")
         
-        # Pattern 3: "RoomType of W meters by L meters" (e.g., "warehouse of 20 meters by 15 meters")
-        pattern3 = r'(\w+)\s+of\s+(\d+\.?\d*)\s*(?:m|meters?)\s+by\s+(\d+\.?\d*)\s*(?:m|meters?)'
+        # Pattern 3: "RoomType of [size] W [m] (x|by) L [m]"
+        # (e.g., "warehouse of 20 meters by 15 meters", "office of size 8x6")
+        pattern3 = (r'(\w+)\s+of\s+(?:size\s+)?(\d+\.?\d*)\s*(?:meters?|m)?\s*(?:[x×]|by)\s*'
+                    r'(\d+\.?\d*)\s*(?:meters?|m)?\b')
         matches3 = re.finditer(pattern3, description, re.IGNORECASE)
         for match in matches3:
             room_type = match.group(1).lower()

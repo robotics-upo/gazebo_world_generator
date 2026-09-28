@@ -10,10 +10,9 @@ import math
 import json
 import random
 from typing import List, Dict, Optional, Tuple
-from transformers import AutoTokenizer
 
 from gazebo_world_generator.src.core.data_models import Room, GazeboModel
-from gazebo_world_generator.src.config.settings import DEFAULT_MODEL
+from gazebo_world_generator.src.utils.token_estimator import estimate_tokens
 from gazebo_world_generator.src.placement.semantic_grouping import SemanticGroupingEngine
 from gazebo_world_generator.src.utils.sdf_parser import SDFDimensionExtractor
 from gazebo_world_generator.src.utils.collision_detection import CollisionDetector
@@ -83,16 +82,18 @@ class NaturalPlacementEngine:
         self.model_db = model_db
         self.llm_interface = llm_interface
         self.sdf_extractor = SDFDimensionExtractor()
-        self.semantic_grouping = SemanticGroupingEngine(llm_interface) if llm_interface else None
-
         # Use provided configs or create defaults
         self.config = placement_config if placement_config else PlacementConfig()
+        self.rng = random.Random(self.config.random_seed)
         self.room_config = room_config if room_config else RoomConfig()
+        self.semantic_grouping = (
+            SemanticGroupingEngine(llm_interface, self.config.chars_per_token)
+            if llm_interface else None
+        )
         
         # Initialize collision detector (will be properly configured when placing objects)
         self.collision_detector = None
 
-        self.tokenizer = AutoTokenizer.from_pretrained(DEFAULT_MODEL, trust_remote_code=True)
         
         # Initialize PromptManager
         if llm_interface and hasattr(llm_interface, 'prompt_manager'):
@@ -722,12 +723,7 @@ Generate JSON array with {total_object_count} objects in '{room.name}' ({room.ty
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]
         
 
-        prompt_string = self.tokenizer.apply_chat_template(
-            messages, 
-            tokenize=False, 
-            add_generation_prompt=True
-        )
-        input_tokens = len(self.tokenizer.encode(prompt_string))
+        input_tokens = estimate_tokens(messages, self.config.chars_per_token)
 
         available_output_tokens = CONTEXT_LIMIT - input_tokens - SAFETY_MARGIN
 
@@ -824,12 +820,7 @@ Layout:
 Corrections JSON array (or []):"""
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]
         
-        prompt_string = self.tokenizer.apply_chat_template(
-            messages, 
-            tokenize=False, 
-            add_generation_prompt=True
-        )
-        input_tokens = len(self.tokenizer.encode(prompt_string))
+        input_tokens = estimate_tokens(messages, self.config.chars_per_token)
 
         available_output_tokens = CONTEXT_LIMIT - input_tokens - SAFETY_MARGIN
 
@@ -951,7 +942,16 @@ Corrections JSON array (or []):"""
                         for obj in plan if obj not in items
                     ]
                     
-                    grid_placements = self.grid_strategy.place(items, room, existing)
+                    grid_inputs = [
+                        {
+                            'name': item.get('unique_name', f'{obj_type}_{index}'),
+                            'type': item['type'],
+                            'dimensions': self.get_actual_model_dimensions(
+                                item['type'], room_type=room.type),
+                        }
+                        for index, item in enumerate(items)
+                    ]
+                    grid_placements = self.grid_strategy.place(grid_inputs, room, existing)
                     
                     # Update plan with grid placements
                     for orig_item, new_placement in zip(items, grid_placements):
@@ -1123,12 +1123,12 @@ Corrections JSON array (or []):"""
                         if dist < min_dist and dist > 0.01:
                             min_dist = dist
                             # Normalize direction
-                            push_dir_x = dx / dist if dist > 0.01 else random.uniform(-1, 1)
-                            push_dir_y = dy / dist if dist > 0.01 else random.uniform(-1, 1)
+                            push_dir_x = dx / dist if dist > 0.01 else self.rng.uniform(-1, 1)
+                            push_dir_y = dy / dist if dist > 0.01 else self.rng.uniform(-1, 1)
                     
                     # If no clear direction (objects coincident), pick random
                     if abs(push_dir_x) < 0.01 and abs(push_dir_y) < 0.01:
-                        angle = random.uniform(0, 2 * math.pi)
+                        angle = self.rng.uniform(0, 2 * math.pi)
                         push_dir_x = math.cos(angle)
                         push_dir_y = math.sin(angle)
                     
@@ -2466,8 +2466,7 @@ Corrections JSON array (or []):"""
             
             model_path = self.model_db.find_best_model(obj_type, room.type)
             if not model_path:
-                logger.warning(f"No model found for '{obj_type}', skipping.")
-                continue
+                raise ValueError(f"No visible model found for requested object '{obj_type}'")
             
             pose = item['pose']
             # Enforce z=0 for ground items, preserve Z for surface items
@@ -2508,8 +2507,7 @@ Corrections JSON array (or []):"""
 
             model_path = self.model_db.find_best_model(obj_type, room.type)
             if not model_path:
-                logger.warning(f"No model found for '{obj_type}', skipping.")
-                continue
+                raise ValueError(f"No visible model found for requested object '{obj_type}'")
 
             pose = item['pose']
 

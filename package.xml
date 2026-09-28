@@ -12,15 +12,12 @@
 
   <buildtool_depend>ament_python</buildtool_depend>
 
-  <depend>rclpy</depend>
-  <depend>std_msgs</depend>
-  <depend>std_srvs</depend>
-  <depend>gazebo_ros</depend>
-  <depend>gazebo_ros2_2dmap_plugin</depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend condition="$ROS_DISTRO == 'humble'">gazebo_ros</exec_depend>
+  <exec_depend condition="$ROS_DISTRO == 'jazzy'">ros_gz_sim</exec_depend>
 
-
-  <exec_depend>python3-openai</exec_depend>
-  <exec_depend>python3-yaml</exec_depend>
+  <!-- Python libraries without suitable rosdep keys come from requirements.txt. -->
+  <exec_depend>python3-pip</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

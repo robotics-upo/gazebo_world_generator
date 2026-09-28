@@ -1,0 +1,65 @@
+# Containerised generator. Typical use:
+#   mkdir -p generated_worlds ~/.gazebo/models
+#   docker compose run --rm classic                     # interactive menu
+#   docker compose run --rm harmonic --description "8m x 6m office with 1 desk"
+# See README "Docker" for the variables below.
+
+x-generator: &generator
+  # Host networking lets the container reach an LLM server on localhost.
+  network_mode: host
+  stdin_open: true
+  tty: true
+  user: "${GWG_UID:-1000}:${GWG_GID:-1000}"
+  environment:
+    - GAZEBO_WORLD_GEN_LLM__SERVER_URL
+    - GAZEBO_WORLD_GEN_LLM__MODEL_NAME
+    - OPENAI_API_KEY
+    - GITHUB_TOKEN
+  volumes:
+    - ${GWG_OUTPUT_DIR:-./generated_worlds}:/data/generated_worlds
+    # Shared with the host so worlds using downloaded models open natively.
+    - ${GWG_MODELS_DIR:-${HOME}/.gazebo/models}:/data/models
+
+x-gui: &gui
+  <<: *generator
+  profiles: [gui]
+  environment:
+    - DISPLAY
+    - QT_X11_NO_MITSHM=1
+  volumes:
+    - ${GWG_OUTPUT_DIR:-./generated_worlds}:/data/generated_worlds
+    - ${GWG_MODELS_DIR:-${HOME}/.gazebo/models}:/data/models
+    - /tmp/.X11-unix:/tmp/.X11-unix:ro
+  devices:
+    - /dev/dri
+
+services:
+  classic:
+    <<: *generator
+    image: ghcr.io/robotics-upo/gazebo_world_generator:classic
+    build: &classic-build
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        ROS_DISTRO: humble
+
+  harmonic:
+    <<: *generator
+    image: ghcr.io/robotics-upo/gazebo_world_generator:harmonic
+    build: &harmonic-build
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        ROS_DISTRO: jazzy
+
+  # Experimental: open a world in the container's simulator over X11.
+  #   xhost +local: && docker compose run --rm classic-gui gazebo generated_worlds/worlds/<name>.sdf
+  classic-gui:
+    <<: *gui
+    image: ghcr.io/robotics-upo/gazebo_world_generator:classic
+    build: *classic-build
+
+  harmonic-gui:
+    <<: *gui
+    image: ghcr.io/robotics-upo/gazebo_world_generator:harmonic
+    build: *harmonic-build

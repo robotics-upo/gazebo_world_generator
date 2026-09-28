@@ -9,8 +9,7 @@ import json, json5
 import logging
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
-from transformers import AutoTokenizer
-from gazebo_world_generator.src.config.settings import DEFAULT_MODEL
+from gazebo_world_generator.src.utils.token_estimator import estimate_tokens
 from gazebo_world_generator.src.prompts.manager import PromptManager
 
 logger = logging.getLogger(__name__)
@@ -53,9 +52,9 @@ SEMANTIC_GROUPING_SCHEMA = {
 class SemanticGroupingEngine:
     """Engine for determining semantic relationships between objects using LLM reasoning"""
 
-    def __init__(self, llm_interface):
+    def __init__(self, llm_interface, chars_per_token: float = 3.0):
         self.llm_interface = llm_interface
-        self.tokenizer = AutoTokenizer.from_pretrained(DEFAULT_MODEL, trust_remote_code=True)
+        self.chars_per_token = chars_per_token
         
         # Initialize PromptManager
         if llm_interface and hasattr(llm_interface, 'prompt_manager'):
@@ -127,12 +126,7 @@ class SemanticGroupingEngine:
         try:
             logger.info(f"Requesting semantic grouping analysis for {len(object_summary)} object types...")
             
-            prompt_string = self.tokenizer.apply_chat_template(
-                messages, 
-                tokenize=False, 
-                add_generation_prompt=True
-            )
-            input_tokens = len(self.tokenizer.encode(prompt_string))
+            input_tokens = estimate_tokens(messages, self.chars_per_token)
 
             available_output_tokens = CONTEXT_LIMIT - input_tokens - SAFETY_MARGIN
 

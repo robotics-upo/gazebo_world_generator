@@ -1,0 +1,24 @@
+name: Headless tests
+on: [push, pull_request]
+jobs:
+  ros:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [classic, harmonic]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        run: docker build -f docker/Dockerfile.${{ matrix.target }} .
+  map-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: robotics-upo/gazebo_ros2_2Dmap_plugin
+          ref: 74a8939e09f0aeeec63e221875429b2ea5e45f7d # humble
+          path: .ci/companion_classic
+      - name: Build plugins and compare maps
+        run: bash integration/run_map_parity.sh .ci/companion_classic

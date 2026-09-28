@@ -1,317 +1,281 @@
 # Gazebo World Generator
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
-![ROS Version](https://img.shields.io/badge/ROS-Humble-orange.svg)
-![Python Version](https://img.shields.io/badge/Python-3.8+-green.svg)
+![ROS Version](https://img.shields.io/badge/ROS%202-Humble%20%7C%20Jazzy-orange.svg)
+![Python Version](https://img.shields.io/badge/Python-3.10+-green.svg)
 
 **Build Complex Gazebo Worlds with a Single Sentence.**
 
-Gazebo World Generator transforms your ideas into fully-functional Gazebo Classic simulations. Leveraging the power of Large Language Models, this ROS2 package intelligently interprets plain English descriptions to automatically generate collision-free layouts, place furniture, and even produce 2D navigation maps.
+Gazebo World Generator turns plain English descriptions into Gazebo worlds, places furniture, and can produce 2D navigation maps. It supports Gazebo Classic on ROS 2 Humble and Gazebo Harmonic on ROS 2 Jazzy.
 
 Console Interface             |  Generated World
 :-------------------------:|:-------------------------:
 ![console](https://github.com/robotics-upo/gazebo_world_generator/blob/master/media/gazebo_world_gen_console.gif) | *"A 12x10 m warehouse with 8 pallets and 10 shelves connected to a small office with a desk and a chair"* ![world](https://github.com/robotics-upo/gazebo_world_generator/blob/master/media/gazebo_world_gen_world.gif)
 
-
 > [!NOTE]
-> Please be mindful that this is a work in progress, and while we strive for accuracy, the generated worlds may require some manual adjustments to meet specific needs.
+> This is a work in progress. Generated worlds may need manual adjustments.
 
 ## Table of Contents
 
 - [Features](#features)
-- [Prerequisites](#prerequisites)
 - [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Usage Examples](#usage-examples-non-interactive)
+- [Usage](#usage)
 - [Configuration](#configuration)
-- [Output Files](#output-files)
-- [Command Line Options](#command-line-options)
 - [How It Works](#how-it-works)
 - [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [License](#license)
 
 ## Features
 
-- **Natural language input** – Describe your world in plain English
-- **Automatic placement** – Smart furniture grouping (offices) or systematic grid layouts (warehouses)
-- **Navigation ready** – Generates 2D maps for robot navigation
-- **Interactive refinement** – Modify existing worlds with simple commands
-- **Flexible dimensions** – Specify exact room sizes
-
-## Prerequisites
-
-- ROS2 Humble
-- Python 3.8 or newer
-- OpenAI-compatible LLM server (e.g., LM Studio, Ollama, OpenAI API)
+- **Natural language input** – describe the world in plain English
+- **Automatic placement** – furniture grouping for offices, grid layouts for warehouses
+- **Navigation maps** – 2D occupancy maps when the map plugin is available
+- **Interactive refinement** – modify existing worlds with simple commands
+- **Room dimensions** – specify exact room sizes
 
 ## Installation
 
-### 1. Clone the repository
+All options need an OpenAI-compatible LLM server (LM Studio, Ollama, vLLM, OpenAI API, ...).
+
+| Option | Provides | Requires |
+| --- | --- | --- |
+| [Native ROS 2](#native-ros-2) | Worlds, maps, `ros2 run` | ROS 2 Humble + Gazebo Classic 11, or ROS 2 Jazzy + Gazebo Harmonic |
+| [Docker](#docker) | Worlds and maps without ROS on the host | Docker with Compose |
+| [Python only](#python-only) | Worlds only (no maps) | Python 3.10+ |
+
+### Native ROS 2
 
 ```bash
 cd ~/ros2_ws/src
-git clone https://github.com/robotics-upo/gazebo_world_generator.git 
-```
+git clone https://github.com/robotics-upo/gazebo_world_generator.git
+pip install --user -r gazebo_world_generator/requirements.txt
 
-### 2. Install dependencies
+# Humble / Classic
+sudo apt-get install ros-humble-gazebo-ros-pkgs
+# Jazzy / Harmonic
+sudo apt-get install ros-jazzy-ros-gz
 
-```bash
-# Python packages
-cd gazebo_world_generator
-pip install -r requirements.txt
-
-# ROS2 packages
-sudo apt-get install ros-humble-gazebo-ros ros-humble-gazebo-ros-pkgs
-```
-
-### 3. Configure your LLM server
-
-Edit the configuration file `config/generator_config.yaml`:
-
-```bash
-nano config/generator_config.yaml
-```
-
-Set your server details:
-
-```yaml
-llm:
-  server_url: "http://localhost:1234/v1"
-  model_name: "your-model-name"
-```
-
-### 4. Build the package
-
-```bash
 cd ~/ros2_ws
 colcon build --packages-select gazebo_world_generator
 source install/setup.bash
 ```
 
-## Quick Start
+On Ubuntu 24.04 (Jazzy), pip refuses to install into the system Python
+(`externally-managed-environment`); add `--break-system-packages` to the pip
+command.
 
-Run the generator:
+**Map plugin (optional).** Maps need `gazebo_ros2_2dmap_plugin` in a sourced
+workspace. `ros2 pkg executables gazebo_ros2_2dmap_plugin` lists
+`generate_map.sh` when it is available. Without it, worlds are still generated
+and the map step is reported as skipped.
+
+```bash
+# Humble: companion plugin, humble branch
+sudo apt-get install ros-humble-nav2-map-server
+git clone -b humble https://github.com/robotics-upo/gazebo_ros2_2Dmap_plugin.git \
+    ~/ros2_ws/src/gazebo_ros2_2dmap_plugin
+
+# Jazzy: Harmonic port shipped in this repository
+cp -a ~/ros2_ws/src/gazebo_world_generator/integration/harmonic_map_plugin \
+    ~/ros2_ws/src/gazebo_ros2_2dmap_plugin
+
+cd ~/ros2_ws && colcon build --packages-select gazebo_ros2_2dmap_plugin
+source install/setup.bash
+```
+
+### Docker
+
+The images bundle ROS 2, the simulator, the map plugin and the generator:
+`classic` (Humble + Gazebo Classic) and `harmonic` (Jazzy + Gazebo Harmonic).
+From a clone of this repository:
+
+```bash
+mkdir -p generated_worlds ~/.gazebo/models   # create before the first run
+docker compose build classic
+docker compose run --rm classic              # interactive menu
+docker compose run --rm classic --description "8m x 6m office with 1 desk and 1 office chair"
+```
+
+Use `harmonic` instead of `classic` for Gazebo Harmonic. Outputs appear in
+`./generated_worlds` (printed as `/data/generated_worlds` inside the
+container). Downloaded models go to `~/.gazebo/models`, so the host simulator
+can open the worlds (see [Opening worlds](#opening-worlds)).
+
+The container uses host networking, so an LLM server on `localhost` works.
+Set these in your shell or in a `.env` file next to `compose.yaml`:
+
+| Variable | Purpose |
+| --- | --- |
+| `GAZEBO_WORLD_GEN_LLM__SERVER_URL`, `GAZEBO_WORLD_GEN_LLM__MODEL_NAME` | LLM endpoint and model |
+| `OPENAI_API_KEY`, `GITHUB_TOKEN` | Optional credentials |
+| `GWG_OUTPUT_DIR`, `GWG_MODELS_DIR` | Host output and model directories (defaults above) |
+| `GWG_UID`, `GWG_GID` | Container user, default `1000`; set to `$(id -u)`/`$(id -g)` if yours differ |
+
+The container reads neither your personal config file nor custom model
+directories; pass settings as `GAZEBO_WORLD_GEN_...` variables and mount extra
+model directories yourself.
+
+Experimental: open a world inside the container over X11 (may need GPU setup):
+
+```bash
+xhost +local:
+docker compose run --rm classic-gui gazebo generated_worlds/worlds/<name>.sdf
+docker compose run --rm harmonic-gui gz sim generated_worlds/worlds/<name>.sdf
+```
+
+### Python only
+
+```bash
+pipx install git+https://github.com/robotics-upo/gazebo_world_generator.git
+generate_world --simulator harmonic --description "Office with 4 desks and chairs"
+```
+
+`pip install .` in a virtual environment also works. Without ROS the simulator
+defaults to `classic`, and no map is generated.
+
+## Usage
 
 ```bash
 ros2 run gazebo_world_generator generate_world
 ```
 
-This opens an interactive menu:
-
-1. Create a new world from description
-2. Refine an existing world
-3. Test your LLM server connection
-4. Exit
-
-## Usage Examples (non-interactive)
-
-### Basic world creation
+With no arguments, an interactive menu opens: generate a world, refine an
+existing world, test the LLM connection, or exit. Pass `--description` to
+generate directly:
 
 ```bash
 ros2 run gazebo_world_generator generate_world \
-    --description "Office with 4 desks and chairs"
+    --description "12m x 10m warehouse with 8 storage racks and 5 pallets"
 ```
 
-### With room dimensions
+| Option | Meaning |
+| --- | --- |
+| `--description` | World description; omit for interactive mode |
+| `--output` | Exact SDF path. Default: timestamped file in `generated_worlds/worlds/` |
+| `--llm-server`, `--model` | Override the configured LLM endpoint and model |
+| `--simulator` | `classic` or `harmonic`; default follows `ROS_DISTRO` (Jazzy → Harmonic, otherwise Classic) |
+| `--seed` | Seed for placement randomness (LLM output may still vary) |
+| `--debug` | Verbose logging in the log file |
 
-Specify exact sizes using these formats: `"12m x 10m office"`, `"warehouse (20x15m)"`, or `"office of size 8x6"`
+**Writing descriptions.** Give counts; unspecified furniture is not added
+("warehouse" is an empty room). Room sizes are recognised as
+`"12m x 10m office"`, `"warehouse (20x15m)"` or `"office of size 8x6"`.
+Warehouses with racks and pallets use grid placement. Check the reported object
+count: the LLM can misread a request, and generation fails with the object type
+named if no suitable model is found.
 
-```bash
-ros2 run gazebo_world_generator generate_world \
-    --description "12m x 10m warehouse with 8 storage racks"
-```
+**Refinement.** Choose menu option 2 and describe changes, e.g. "Add 3 more
+desks with chairs", "Remove all bookshelves", "Move desks closer to the entrance".
 
-### Warehouse environments
-
-For warehouses with storage racks and pallets, the system automatically uses optimized grid-based placement:
-
-```bash
-ros2 run gazebo_world_generator generate_world \
-    --description "Warehouse with 10 storage racks and 5 pallets"
-```
-
-**Note:** Always specify exact quantities for objects. The system will generate only what you explicitly request (e.g., "5 pallets" creates exactly 5 pallets, not more).
-
-### All available options
-
-```bash
-ros2 run gazebo_world_generator generate_world \
-    --description "your world description" \
-    --llm-server http://localhost:1234/v1 \
-    --model your-model-name \
-    --output custom-filename.sdf \
-    --debug
-```
-
-If no output filename is specified, a timestamped name is generated automatically.
-
-### Refinement examples
-
-Use the interactive menu (option 2) to modify existing worlds:
-
-- "Add 3 more desks with chairs"
-- "Remove all bookshelves"
-- "Move desks closer to the entrance"
-
-## Configuration
-
-Edit `config/generator_config.yaml` to configure your LLM server and other settings:
-
-```yaml
-llm:
-  server_url: "http://localhost:1234/v1"  # Your LLM server endpoint
-  model_name: "your-model-name"            # Your model name
-
-output:
-  base_directory: "generated_worlds"       # Output directory
-  auto_generate_map: true                  # Generate navigation maps
-
-placement:
-  min_object_distance: 0.5                 # Object spacing (meters)
-  corridor_width: 1.2                      # Traffic flow space (meters)
-```
-
-The generator requires an **OpenAI-compatible LLM server endpoint**. Compatible servers include LM Studio, Ollama, OpenAI API, or any custom OpenAI-compatible API.
-
-### Custom configuration location
-
-For user-specific settings that persist across package updates:
-
-```bash
-mkdir -p ~/.config/gazebo_world_generator
-cp config/generator_config.yaml ~/.config/gazebo_world_generator/
-nano ~/.config/gazebo_world_generator/generator_config.yaml
-```
-
-Config priority: package directory → user home (`~/.config/`) → system (`/etc/`)
-
-## Output Files
-
-Generated worlds are saved in `generated_worlds/` with these files:
+### Output files
 
 ```plaintext
 generated_worlds/
-├── worlds/
-│   └── world_YYYYMMDD_HHMMSS.sdf    # World file (SDF format)
-├── logs/
-│   └── world_YYYYMMDD_HHMMSS.log    # Generation log
-└── occupancy_maps/
-    ├── world_YYYYMMDD_HHMMSS.yaml   # Map metadata
-    └── world_YYYYMMDD_HHMMSS.pgm    # 2D navigation map
+├── worlds/world_<timestamp>.sdf           # Gazebo world
+├── logs/world_<timestamp>.log             # Detailed generation log
+└── occupancy_maps/world_<timestamp>.{pgm,yaml}   # 2D map, when enabled and available
 ```
 
-**File format glossary:**
+Logs and maps always go under the output directory, even with `--output`.
 
-- SDF (Simulation Description Format) – Gazebo's world file format
-- PGM (Portable Gray Map) – 2D occupancy grid for robot navigation
-- YAML – Map configuration and metadata
+### Opening worlds
 
-## Command Line Options
+Downloaded models live in `~/.gazebo/models`; expose that directory to the
+simulator (plus any custom `models.search_paths`):
 
-Override config settings from the command line:
+```bash
+# Humble / Classic
+export GAZEBO_MODEL_PATH="$HOME/.gazebo/models${GAZEBO_MODEL_PATH:+:$GAZEBO_MODEL_PATH}"
+gazebo generated_worlds/worlds/<name>.sdf
 
-- `--description` – World description (required for non-interactive mode)
-- `--llm-server` – Override LLM server URL
-- `--model` – Override model name
-- `--output` – Custom output filename
-- `--debug` – Enable verbose logging
+# Jazzy / Harmonic
+export GZ_SIM_RESOURCE_PATH="$HOME/.gazebo/models${GZ_SIM_RESOURCE_PATH:+:$GZ_SIM_RESOURCE_PATH}"
+gz sim generated_worlds/worlds/<name>.sdf
+```
+
+On Classic, close Gazebo before generating a map: the map script stops running
+Gazebo servers, so the generator reports an error instead of doing so.
+
+## Configuration
+
+Defaults live in `config/generator_config.yaml`:
+
+```yaml
+llm:
+  server_url: "http://localhost:1234/v1"
+  model_name: "your-model-name"
+output:
+  base_directory: "generated_worlds"
+  auto_generate_map: true
+placement:
+  min_object_distance: 0.5   # meters
+  corridor_width: 1.2        # meters
+```
+
+Settings are merged from lowest to highest priority:
+
+1. `config/generator_config.yaml`
+2. `~/.config/gazebo_world_generator/generator_config.yaml` (only the keys you override)
+3. `GAZEBO_WORLD_GEN_...` environment variables, nested with `__`
+   (e.g. `GAZEBO_WORLD_GEN_OUTPUT__AUTO_GENERATE_MAP=false`)
+4. Command-line options
+
+Keep machine-specific settings such as your LLM endpoint in the personal file
+rather than the repository. If a repository change seems ignored, check the
+personal file.
 
 ## How It Works
 
-The generator uses an optimized multi-phase pipeline to transform your description into a complete simulation world:
-
-1. **Dimension Extraction** – Parses explicit measurements (e.g., "12m x 10m")
-2. **LLM Parsing** – Converts natural language to structured JSON with exact object counts
-3. **Object Expansion** – Expands compressed object counts into individual instances
-4. **Model Resolution** – Maps object names to Gazebo models with intelligent caching
-5. **Layout Strategy** – Chooses between semantic grouping (offices) or grid placement (warehouses)
-6. **Room Layout** – Optimizes room positions and connections
-7. **Collision-Free Placement** – Positions objects with automatic collision avoidance
-8. **World Generation** – Creates the SDF file with physics and lighting
-9. **Map Generation** – Produces 2D navigation maps
+1. **Parsing** – explicit room sizes are extracted, then the LLM turns the description into rooms with object types and counts.
+2. **Room layout** – rooms, corridors and doorways are positioned.
+3. **Model resolution** – each object type is matched to a local or online (Gazebo Fuel, GitHub) model whose meshes, textures and measured size are checked.
+4. **Placement** – LLM-planned layouts are refined by wall, grid and grouping strategies with collision avoidance.
+5. **Output** – the SDF world is written, then the occupancy map when enabled.
 
 ## Troubleshooting
 
-### LLM server connection issues
+**LLM connection.** Use menu option 3, or `curl <server_url>/models`.
 
-Test your connection:
+**No suitable model found.** The generator searches `models.search_paths`, the
+model cache, `GAZEBO_MODEL_PATH`/`GZ_SIM_RESOURCE_PATH` and online providers,
+including synonyms (e.g. "couch" for "sofa"). Models without visible geometry,
+with missing mesh or texture files, or too small for the requested furniture
+(e.g. a `DeskPortrait` for "desk") are rejected; the world log lists why. The
+chosen models must also be visible to the simulator when opening the world.
 
-```bash
-# Built-in test
-ros2 run gazebo_world_generator generate_world
-# Select option 3: "Test LLM connection"
+**Context limit errors** (`'max_tokens' is too large`). Output tokens are
+reduced automatically to fit the model. For very large worlds, split the
+request into smaller rooms or use a model with a larger context.
 
-# Manual test
-curl http://localhost:1234/v1/models
-```
+**Object overlaps.** Enlarge the room or reduce the object count; see
+`generated_worlds/logs/` for warnings.
 
-### No compatible Gazebo models found
-
-This error occurs when the generator cannot find the model files corresponding to your request.
-
-First, ensure your Gazebo model paths are set up correctly. If you have custom models, add their location to the GAZEBO_MODEL_PATH environment variable:
-
-```bash
-export GAZEBO_MODEL_PATH=~/my_gazebo_models:$GAZEBO_MODEL_PATH
-```
-
-**Important**: For the generator to successfully spawn a model, its files must exist in one of two places:
-
-- Your local GAZEBO_MODEL_PATH.
-
-- The provided online Gazebo model repositories.
-
-The system is smart enough to also search for synonyms (e.g., searching for "couch" if you ask for a "sofa"), but it still needs to find the actual model files in one of those locations. If the files are missing, the process will fail.
-
-### LLM context limit errors
-
-If you see errors like `'max_tokens' is too large`, the system automatically handles this by:
-
-- Estimating input token count from your description
-- Adjusting output token limits to fit within model constraints
-
-For very large worlds (20+ objects), the system will automatically reduce response size. If generation fails:
-
-- Split into smaller rooms or use batch refinement operations
-- Use a model with larger context
-
-### Missing objects or incorrect counts
-
-The generator creates **only** the objects you explicitly specify:
-
-- ❌ "warehouse" → Empty room (no objects added automatically)
-- ✅ "warehouse with 10 storage racks" → Exactly 10 racks, nothing more
-
-Always specify exact quantities in your description.
-
-### Object overlaps
-
-The system includes automatic collision avoidance. If issues persist:
-
-- Increase room size in your description
-- Reduce furniture quantity
-- Check `generated_worlds/logs/` for warnings
-
-### Build failures
-
-Clean rebuild:
+**Build or package not found.**
 
 ```bash
-cd ~/ros2_ws
-rm -rf build/ install/ log/
+cd ~/ros2_ws && rm -rf build/ install/ log/
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --packages-select gazebo_world_generator
+source install/setup.bash
 ```
 
-### Package not found
-
-Source your workspace:
+## Development
 
 ```bash
-source ~/ros2_ws/install/setup.bash
-ros2 pkg list | grep gazebo_world_generator
+pip install -r requirements-dev.txt
+python3 -m pytest -q tests                              # or: colcon test --packages-select gazebo_world_generator
+docker build -f docker/Dockerfile.classic .             # CI test images; the suite runs during the build
+docker build -f docker/Dockerfile.harmonic .
+bash integration/run_map_parity.sh /path/to/humble-plugin   # Classic vs Harmonic map comparison
 ```
+
+The Harmonic map plugin in `integration/harmonic_map_plugin` is a standalone
+ROS package ported from the companion plugin's Fortress branch. CI builds both
+plugins, validates generated SDF files, and compares Classic and Harmonic maps
+for three layouts. The parity runner prints the `/tmp/gwg-map-parity.*`
+directory holding its artifacts. Standalone `gz sdf -k` checks of worlds with
+`model://` includes may need `SDF_PATH` set to the model directory.
 
 ## License
 
-MIT License - Copyright (c) 2025 Service Robotics Lab
-
-See [LICENSE](LICENSE) file for full details.
+MIT License - Copyright (c) 2026 Service Robotics Lab. See [LICENSE](LICENSE).

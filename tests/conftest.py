@@ -3,6 +3,16 @@ import os
 import tempfile
 from unittest.mock import MagicMock
 
+
+@pytest.fixture(autouse=True)
+def isolated_home(tmp_path, monkeypatch):
+    """Keep caches and prompt metrics out of the developer's home directory."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+
 @pytest.fixture
 def sample_sdf_content():
     return """<?xml version="1.0" ?>

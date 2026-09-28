@@ -18,6 +18,7 @@ import json
 import os
 
 from jinja2 import Environment, FileSystemLoader, Template, TemplateNotFound
+from gazebo_world_generator.src.resources import find_data_path, user_state_dir
 
 logger = logging.getLogger(__name__)
 
@@ -116,43 +117,20 @@ class PromptManager:
             enable_metrics: Enable performance tracking
             metrics_file: File to persist metrics
         """
-        # Set template directory
-        if template_dir is None:
-            # Try ROS2 share directory first (for installed packages)
-            try:
-                from ament_index_python.packages import get_package_share_directory
-                share_dir = Path(get_package_share_directory('gazebo_world_generator'))
-                template_dir = share_dir / 'prompts'
-                if not template_dir.exists():
-                    raise FileNotFoundError("Share directory prompts not found")
-            except (ImportError, FileNotFoundError, Exception) as e:
-                # Fallback to source directory (for development)
-                logger.debug(f"ROS2 share directory not available ({e}), using source directory")
-                pkg_dir = Path(__file__).parent.parent.parent.parent
-                template_dir = pkg_dir / 'prompts'
-        else:
-            # If template_dir is provided, resolve it relative to package directory if it's a relative path
-            template_dir = Path(template_dir)
-            if not template_dir.is_absolute():
-                # Try ROS2 share directory first
-                try:
-                    from ament_index_python.packages import get_package_share_directory
-                    share_dir = Path(get_package_share_directory('gazebo_world_generator'))
-                    template_dir = share_dir / template_dir
-                    if not template_dir.exists():
-                        raise FileNotFoundError("Share directory template_dir not found")
-                except (ImportError, FileNotFoundError, Exception):
-                    # Fallback to source directory
-                    pkg_dir = Path(__file__).parent.parent.parent.parent
-                    template_dir = pkg_dir / template_dir
+        # Relative directories resolve against the source tree, ROS share
+        # directory, or pip data prefix, in that order.
+        template_dir = Path(template_dir or 'prompts')
+        if not template_dir.is_absolute():
+            template_dir = find_data_path(str(template_dir)) or template_dir
 
         self.template_dir = template_dir
         self.default_version = default_version
         self.enable_metrics = enable_metrics
 
-        # Set up metrics file
+        # Installed share directories may be read-only, so metrics live
+        # in the per-user state directory.
         if metrics_file is None:
-            metrics_file = self.template_dir / '.metrics.json'
+            metrics_file = user_state_dir() / 'prompt_metrics.json'
         self.metrics_file = Path(metrics_file)
 
         # Initialize Jinja2 environment

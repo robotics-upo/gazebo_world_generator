@@ -1,0 +1,8 @@
+FROM gwg-harmonic:ci
+SHELL ["/bin/bash", "-c"]
+COPY integration/harmonic_map_plugin /ws/src/gazebo_ros2_2dmap_plugin
+WORKDIR /ws
+RUN source /opt/ros/jazzy/setup.bash && \
+    colcon build --packages-select gazebo_ros2_2dmap_plugin
+RUN mkdir -p /root/.gazebo/models && \
+    cp -a /ws/src/gazebo_world_generator/tests/fixtures/models/test_crate /root/.gazebo/models/

@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>gazebo_ros2_2dmap_plugin</name>
+  <version>0.1.0</version>
+  <description>Gazebo Harmonic plugin to generate PGM and YAML occupancy maps from simulated worlds.</description>
+
+  <maintainer email="robotics@upo.es">Service Robotics Lab</maintainer>
+  <license>MIT AND Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Gazebo Harmonic dependencies -->
+  <build_depend>gz_sim_vendor</build_depend>
+  <build_depend>gz_plugin_vendor</build_depend>
+  <build_depend>gz_transport_vendor</build_depend>
+  <build_depend>gz_msgs_vendor</build_depend>
+  <build_depend>gz_math_vendor</build_depend>
+  <build_depend>gz_common_vendor</build_depend>
+  <build_depend>sdformat_vendor</build_depend>
+  
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+
+</package>
