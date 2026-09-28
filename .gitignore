@@ -21,6 +21,7 @@ build/
 # Generated files
 generated_worlds/
 *.sdf
+!tests/fixtures/**/*.sdf
 *.world
 test_output/
 

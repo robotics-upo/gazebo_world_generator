@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+  <model name="test_crate">
+    <static>true</static>
+    <link name="link">
+      <collision name="collision"><geometry><box><size>0.8 0.4 1.8</size></box></geometry></collision>
+      <visual name="visual"><geometry><box><size>0.8 0.4 1.8</size></box></geometry></visual>
+    </link>
+  </model>
+</sdf>

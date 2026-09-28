@@ -1,0 +1,20 @@
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <world name="map_room">
+    <gravity>0 0 -9.8</gravity>
+    <model name="floor">
+      <static>true</static>
+      <pose>0 0 -0.1 0 0 0</pose>
+      <link name="floor_link">
+        <collision name="floor_collision"><geometry><box><size>6 6 0.2</size></box></geometry></collision>
+      </link>
+    </model>
+    <model name="wall">
+      <static>true</static>
+      <pose>1 0 1 0 0 0</pose>
+      <link name="wall_link">
+        <collision name="wall_collision"><geometry><box><size>0.3 3 2</size></box></geometry></collision>
+      </link>
+    </model>
+  </world>
+</sdf>
