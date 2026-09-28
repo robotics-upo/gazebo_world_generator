@@ -1,0 +1,16 @@
+The checker measured your layout (round {{ round }} of {{ max_rounds }}).
+
+CURRENT LAYOUT:
+{{ layout_json }}
+
+PROBLEMS:
+{% for violation in violations %}
+- {{ violation }}
+{% endfor %}
+
+{% if has_image %}The attached image shows this layout from above: each object's shape (darker = taller) inside its footprint with its id, a blue arrow for the front you declared, problem objects outlined in red, doorway zones in green.
+{% endif %}
+Fix the problems by moving only the objects involved ({{ problem_ids | join(", ") }}); every other object keeps its current pose. Follow the hints: they give the distance and direction needed. If a requirement you chose does not actually serve the user's request (or contradicts another), drop or correct it instead of fighting it - but never to hide a real problem.
+
+Reply with ONLY JSON (no markdown) listing just the objects you move. Include "requirements" only if you change them:
+{"objects": [{"id": "...", "x": 0.0, "y": 0.0, "yaw": 0.0}]}

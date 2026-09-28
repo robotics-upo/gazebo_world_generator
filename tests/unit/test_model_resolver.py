@@ -176,3 +176,37 @@ def test_spaced_model_directory_gets_relative_symlink(tmp_path):
     assert "Office Desk" in resolver.local_models
     link = tmp_path / "Office_Desk"
     assert link.is_symlink() and str(link.readlink()) == "Office Desk"
+
+
+def test_model_shape_reads_collada_polylist_through_scene(tmp_path):
+    from gazebo_world_generator.src.models.visual_quality import model_shape
+    directory = _write_box_model(tmp_path, "Quad", "1 1 1")
+    (directory / "meshes").mkdir()
+    (directory / "meshes" / "quad.dae").write_text("""
+<COLLADA xmlns='http://www.collada.org/2005/11/COLLADASchema'>
+  <library_geometries><geometry id='quad'><mesh>
+    <source id='positions'><float_array id='array' count='12'>0 0 0 1 0 0 1 1 0 0 1 1</float_array>
+      <technique_common><accessor source='#array' count='4' stride='3'/></technique_common></source>
+    <vertices id='vertices'><input semantic='POSITION' source='#positions'/></vertices>
+    <polylist count='1'><input semantic='VERTEX' source='#vertices' offset='0'/>
+      <input semantic='NORMAL' source='#normals' offset='1'/>
+      <vcount>4</vcount><p>0 0 1 0 2 0 3 0</p></polylist>
+  </mesh></geometry></library_geometries>
+  <library_visual_scenes><visual_scene id='scene'><node><translate>10 0 0</translate>
+    <instance_geometry url='#quad'/></node></visual_scene></library_visual_scenes>
+  <scene><instance_visual_scene url='#scene'/></scene>
+</COLLADA>""")
+    (directory / "model.sdf").write_text(
+        "<sdf version='1.7'><model name='Quad'><link name='link'><pose>0 0 1 0 0 0</pose>"
+        "<visual name='v'><geometry><mesh><uri>meshes/quad.dae</uri><scale>2 1 1</scale></mesh>"
+        "</geometry></visual></link></model></sdf>")
+    triangles = model_shape(directory)
+    assert len(triangles) == 2
+    assert triangles[0] == ((20.0, 0.0, 1.0), (22.0, 0.0, 1.0), (22.0, 1.0, 1.0))
+
+
+def test_model_shape_of_primitive_box(tmp_path):
+    from gazebo_world_generator.src.models.visual_quality import model_shape
+    triangles = model_shape(_write_box_model(tmp_path, "Crate", "0.6 0.4 0.5"))
+    points = {point for triangle in triangles for point in triangle}
+    assert points == {(-0.3, -0.2, 0.25), (0.3, -0.2, 0.25), (0.3, 0.2, 0.25), (-0.3, 0.2, 0.25)}

@@ -14,6 +14,7 @@ RULES:
 3. Include ALL required fields for each group
 4. Consider room type: {{ room_type }}
 5. Only group functionally related objects
+6. Independent items (obstacles, boxes, cones, barrels, barriers) are NOT a group; return [] when nothing is functionally related
 
 EXAMPLES:
 Office: desk+chair+monitor → workspace (chair="in_front", monitor="on_top")

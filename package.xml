@@ -13,6 +13,7 @@
   <buildtool_depend>ament_python</buildtool_depend>
 
   <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-pil</exec_depend>
   <exec_depend condition="$ROS_DISTRO == 'humble'">gazebo_ros</exec_depend>
   <exec_depend condition="$ROS_DISTRO == 'jazzy'">ros_gz_sim</exec_depend>
 

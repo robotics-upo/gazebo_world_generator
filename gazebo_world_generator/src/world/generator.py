@@ -6,7 +6,7 @@ Manages room layout, wall creation, and object placement coordination.
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from xml.dom import minidom
 import xml.etree.ElementTree as ET
 import math 
@@ -16,6 +16,7 @@ from pathlib import Path
 
 from gazebo_world_generator.src.llm.interface import OpenAICompatibleInterface as LLMInterface
 from gazebo_world_generator.src.core.data_models import Room, GazeboModel
+from gazebo_world_generator.src.core.object_vocabulary import PRIMITIVE_URI
 from gazebo_world_generator.src.models.resolver import SmartModelResolver
 from gazebo_world_generator.src.models.online_database import OnlineModelDatabase
 from gazebo_world_generator.src.placement.engine import NaturalPlacementEngine
@@ -38,6 +39,8 @@ class WorldGenerator:
         self.room_config = self.config.rooms
         self.placement_config = self.config.placement
         self.physics_config = self.config.physics
+        if llm_interface is not None and hasattr(llm_interface, "context_window"):
+            llm_interface.context_window = self.config.llm.context_window
 
         self.online_db = OnlineModelDatabase(llm_interface=llm_interface, config=self.config.models)
         self.model_db = SmartModelResolver(llm_interface=llm_interface, online_db=self.online_db,
@@ -52,6 +55,17 @@ class WorldGenerator:
         # Log to file only
         logger.debug("WorldGenerator initialized with validated configuration")
 
+    def map_seed(self) -> Tuple[float, float]:
+        """A world point on open floor, where the map plugin starts its flood fill."""
+        for room in self.rooms:
+            if room.type == "corridor":
+                continue
+            local = room.free_point if room.free_point is not None else (
+                None if room.objects else (0.0, 0.0))
+            if local is not None:
+                return (room.position["x"] + local[0], room.position["y"] + local[1])
+        return (0.0, 0.0)
+
     def get_unique_model_name(self, base_name: str) -> str:
         """Generates a globally unique name for a model."""
         sane_base_name = base_name.replace(" ", "_")
@@ -64,8 +78,7 @@ class WorldGenerator:
         self.rooms.clear()
         self.models.clear()
         self.model_counter.clear()
-        self.placement_engine.collision_detector = None
-        self.placement_engine._semantic_groups = None
+        self.placement_engine.user_description = description
         if self.placement_config.random_seed is not None:
             self.placement_engine.rng.seed(self.placement_config.random_seed)
         logger.debug(f"Generating world from description: '{description}'")
@@ -74,6 +87,8 @@ class WorldGenerator:
         if not isinstance(parsed_data, dict) or not isinstance(parsed_data.get("rooms"), list) or not parsed_data["rooms"]:
             raise ValueError("LLM did not return a nonempty rooms list")
         logger.info(f"Parsed {len(parsed_data.get('rooms', []))} rooms from description.")
+        for room_data in parsed_data["rooms"]:
+            logger.info(self._describe_interpretation(room_data))
         
         logger.info("Creating room structure and layout...")
         self._create_rooms_and_layout(parsed_data.get("rooms", []))
@@ -173,6 +188,28 @@ class WorldGenerator:
         # Use connection-aware positioning to place rooms
         self._place_rooms_with_connections(room_info)
 
+    @staticmethod
+    def _describe_interpretation(room_data: Dict) -> str:
+        """One line showing how the request was understood, so misreads surface early."""
+        label = room_data.get("type", "room")
+        objects = ", ".join(
+            f"{obj.get('count', 1)} {obj.get('type')}" + (" (inferred)" if obj.get("inferred") else "")
+            for obj in room_data.get("objects") or [] if isinstance(obj, dict)) or "empty"
+        purpose = f" - {room_data['purpose']}" if room_data.get("purpose") else ""
+        return f"Interpreted room '{room_data.get('name')}' ({label}): {objects}{purpose}"
+
+    @staticmethod
+    def _room_from_data(room_data: Dict, dims: Dict, position: Dict) -> Room:
+        return Room(
+            name=room_data['name'],
+            type=room_data.get("type"),
+            dimensions=dims,
+            position=position,
+            objects=room_data.get("objects", []),
+            connections=room_data.get("connections", {}),
+            purpose=room_data.get("purpose", ""),
+        )
+
     def _opposite_side(self, side: str) -> str:
         """Get the opposite side (e.g., 'north' → 'south')."""
         opposites = {
@@ -238,14 +275,7 @@ class WorldGenerator:
         start_dims = start_room_info['dimensions']
         start_position = {"x": 0, "y": 0, "z": 0}
 
-        start_room = Room(
-            name=start_room_data['name'],
-            type=start_room_data.get("type"),
-            dimensions=start_dims,
-            position=start_position,
-            objects=start_room_data.get("objects", []),
-            connections=start_room_data.get("connections", {})
-        )
+        start_room = self._room_from_data(start_room_data, start_dims, start_position)
 
         placed_rooms[start_room.name] = start_room
         self.rooms.append(start_room)
@@ -301,14 +331,7 @@ class WorldGenerator:
                 )
 
                 # Create and place the connected room
-                connected_room = Room(
-                    name=connected_room_data['name'],
-                    type=connected_room_data.get("type"),
-                    dimensions=connected_dims,
-                    position=new_position,
-                    objects=connected_room_data.get("objects", []),
-                    connections=connected_room_data.get("connections", {})
-                )
+                connected_room = self._room_from_data(connected_room_data, connected_dims, new_position)
 
                 placed_rooms[connected_room.name] = connected_room
                 self.rooms.append(connected_room)
@@ -336,14 +359,7 @@ class WorldGenerator:
                     logger.debug(f"Room '{room_name}' has no connections. Placing independently.")
                     position = self._find_empty_position_for_orphan_room(dims)
 
-                room = Room(
-                    name=room_data['name'],
-                    type=room_data.get("type"),
-                    dimensions=dims,
-                    position=position,
-                    objects=room_data.get("objects", []),
-                    connections=connections
-                )
+                room = self._room_from_data(room_data, dims, position)
 
                 self.rooms.append(room)
                 placed_rooms[room_name] = room
@@ -1099,6 +1115,9 @@ class WorldGenerator:
                 if model.static:
                     ET.SubElement(include, "static").text = "true"
                     
+            elif model.model_path == PRIMITIVE_URI:
+                self._add_primitive_box(world, model, pose_text)
+
             elif model.model_path == "built_in_wall":
                 model_elem = ET.SubElement(world, "model", name=model.name)
                 ET.SubElement(model_elem, "static").text = "true"
@@ -1132,6 +1151,27 @@ class WorldGenerator:
         xml_string = ET.tostring(sdf, encoding='unicode')
         dom = minidom.parseString(xml_string)
         return dom.toprettyxml(indent="  ")
+
+    def _add_primitive_box(self, world, model: GazeboModel, pose_text: str):
+        """Inline box for a generic object (e.g. an obstacle) with no usable model."""
+        width, length, height = model.size
+        size_str = f"{width:.3f} {length:.3f} {height:.3f}"
+        model_elem = ET.SubElement(world, "model", name=model.name)
+        ET.SubElement(model_elem, "static").text = "true"
+        ET.SubElement(model_elem, "pose").text = pose_text
+        link = ET.SubElement(model_elem, "link", name="link")
+        # The model origin sits on the floor, like a mesh model's.
+        ET.SubElement(link, "pose").text = f"0 0 {height / 2:.3f} 0 0 0"
+        visual = ET.SubElement(link, "visual", name="visual")
+        ET.SubElement(ET.SubElement(ET.SubElement(visual, "geometry"), "box"), "size").text = size_str
+        material = ET.SubElement(visual, "material")
+        if self.config.simulator == "classic":
+            ET.SubElement(ET.SubElement(material, "script"), "name").text = "Gazebo/Orange"
+        else:
+            ET.SubElement(material, "ambient").text = "0.9 0.45 0.1 1"
+            ET.SubElement(material, "diffuse").text = "0.9 0.45 0.1 1"
+        collision = ET.SubElement(link, "collision", name="collision")
+        ET.SubElement(ET.SubElement(ET.SubElement(collision, "geometry"), "box"), "size").text = size_str
 
     def _validate_sdf(self, sdf_content: str) -> bool:
         """Check the world structure before atomically publishing the SDF."""

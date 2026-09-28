@@ -204,11 +204,12 @@ Defaults live in `config/generator_config.yaml`:
 llm:
   server_url: "http://localhost:1234/v1"
   model_name: "your-model-name"
+  context_window: 8192       # tokens; raise it if your model allows
 output:
   base_directory: "generated_worlds"
   auto_generate_map: true
 placement:
-  min_object_distance: 0.5   # meters
+  max_design_rounds: 3       # LLM layout proposals/revisions per room
   corridor_width: 1.2        # meters
 ```
 
@@ -229,7 +230,7 @@ personal file.
 1. **Parsing** – explicit room sizes are extracted, then the LLM turns the description into rooms with object types and counts.
 2. **Room layout** – rooms, corridors and doorways are positioned.
 3. **Model resolution** – each object type is matched to a local or online (Gazebo Fuel, GitHub) model whose meshes, textures and measured size are checked.
-4. **Placement** – LLM-planned layouts are refined by wall, grid and grouping strategies with collision avoidance.
+4. **Placement** – the LLM designs each room's layout and names the requirements it should meet (e.g. a 0.8 m route between doorways). The generator measures the layout against them and sends the problems back, with a top-down image when the model accepts images, for up to `max_design_rounds` revisions. Any overlaps left are then pushed apart.
 5. **Output** – the SDF world is written, then the occupancy map when enabled.
 
 ## Troubleshooting

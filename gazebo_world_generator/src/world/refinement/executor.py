@@ -15,6 +15,8 @@ from xml.dom import minidom
 
 from ...core.data_models import Room, GazeboModel
 from ...utils.collision_detection import CollisionDetector
+from ...placement.geometry import calculate_relative_position
+from ...utils.file_utils import find_gazebo_model_path
 
 logger = logging.getLogger(__name__)
 
@@ -684,7 +686,7 @@ class OperationExecutor:
         
         px, py, p_yaw = primary_pos
         
-        return self.placement_engine._calculate_relative_position(
+        return calculate_relative_position(
             px, py, p_yaw,
             primary_dims, related_dims,
             arrangement, primary_model_name

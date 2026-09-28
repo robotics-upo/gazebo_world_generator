@@ -13,6 +13,8 @@ from typing import Dict, List, Optional, Set
 
 from gazebo_world_generator.src.config.settings import Config
 from gazebo_world_generator.src.core.data_models import PlacementConstraint
+from gazebo_world_generator.src.core.object_vocabulary import (
+    PRIMITIVE_URI, primitive_size, substitutes_for)
 from gazebo_world_generator.src.utils.cache import get_cache
 from gazebo_world_generator.src.prompts.manager import PromptManager
 from gazebo_world_generator.src.models.visual_quality import inspect_model_visuals
@@ -79,6 +81,10 @@ class SmartModelResolver:
 
         self._local_model_names_cache: Optional[Set[str]] = None
         self._model_name_to_dir_map: Dict[str, str] = {}
+        self._session_results: Dict[str, Optional[str]] = {}
+        self._suitability: Dict[tuple, bool] = {}
+        self._rejected_uris: Set[str] = set()
+        self._reported_rejections = 0
 
 
         online_status = "Enabled" if self.online_db else "Disabled"
@@ -182,19 +188,10 @@ class SmartModelResolver:
 
                 if ' ' in dir_name:
                     clean_name = dir_name.replace(' ', '_')
-                    symlink_path = base_path / clean_name
-                    if not symlink_path.exists():
-                        try:
-                            # Relative, so the link still resolves when the directory
-                            # is mounted elsewhere (e.g. a container's /data/models).
-                            symlink_path.symlink_to(dir_name, target_is_directory=True)
-                            logger.info(f"Created symlink for spaced directory: {clean_name} -> '{dir_name}'")
-                            current_dir_name = clean_name 
-                        except (OSError, PermissionError) as e:
-                            logger.warning(f"Could not create symlink for '{dir_name}': {e}. Skipping model.")
-                            continue
-                    else:
-                        current_dir_name = clean_name # Symlink already exists, use it
+                    if not self._ensure_relative_symlink(base_path, clean_name, dir_name):
+                        logger.warning(f"Could not link '{dir_name}' as {clean_name}. Skipping model.")
+                        continue
+                    current_dir_name = clean_name
 
                 official_model_name = self._get_model_name_from_config(model_dir) or current_dir_name
                 
@@ -210,16 +207,33 @@ class SmartModelResolver:
                 # This ensures URIs inside model.sdf are resolvable
                 self._ensure_mesh_uri_compatibility(base_path, model_dir, current_dir_name)
 
-    def _create_space_free_symlink(self, base_path: Path, dir_name: str, clean_name: str):
-        """Create a symlink without spaces pointing to the original directory."""
-        symlink_path = base_path / clean_name
+    @staticmethod
+    def _ensure_relative_symlink(base_path: Path, link_name: str, target_name: str) -> bool:
+        """Make base_path/link_name a relative link to target_name; True if it resolves there.
 
-        if not symlink_path.exists():
-            try:
-                symlink_path.symlink_to(dir_name)
-                logger.info(f"Created symlink: {clean_name} -> {dir_name} (removing spaces from directory name)")
-            except (OSError, PermissionError) as e:
-                logger.warning(f"Could not create symlink {clean_name} -> {dir_name}: {e}")
+        Links must be relative so they survive the directory being mounted
+        elsewhere (e.g. host ~/.gazebo/models as a container's /data/models).
+        Dangling or absolute links left by earlier runs are replaced; real
+        directories and links to other valid targets are left alone.
+        """
+        link = base_path / link_name
+        target = base_path / target_name
+        try:
+            if link.is_symlink():
+                current = Path(os.readlink(link))
+                if not current.is_absolute() and link.resolve() == target.resolve():
+                    return True
+                if link.exists() and link.resolve() != target.resolve():
+                    return False
+                link.unlink()
+            elif link.exists():
+                return link.is_dir()
+            link.symlink_to(target_name, target_is_directory=True)
+            logger.info(f"Linked {link_name} -> '{target_name}'")
+            return True
+        except OSError as e:
+            logger.warning(f"Could not link {link_name} -> '{target_name}': {e}")
+            return False
 
     def _ensure_mesh_uri_compatibility(self, base_path: Path, model_dir: Path, dir_name: str):
         """Ensures mesh URIs in model.sdf can be resolved by creating symlinks if needed."""
@@ -231,15 +245,7 @@ class SmartModelResolver:
             for mesh_model_name in set(mesh_uris):
                 # If the mesh references a different model name than the directory
                 if mesh_model_name != dir_name and mesh_model_name.lower() != dir_name.lower():
-                    symlink_path = base_path / mesh_model_name
-
-                    # Create symlink if it doesn't exist
-                    if not symlink_path.exists():
-                        try:
-                            symlink_path.symlink_to(dir_name)
-                            logger.info(f"Created symlink: {mesh_model_name} -> {dir_name} (for mesh URI compatibility)")
-                        except (OSError, PermissionError) as e:
-                            logger.warning(f"Could not create symlink {mesh_model_name} -> {dir_name}: {e}")
+                    self._ensure_relative_symlink(base_path, mesh_model_name, dir_name)
         except Exception as e:
             logger.debug(f"Could not check mesh URIs for {model_dir.name}: {e}")
 
@@ -276,8 +282,21 @@ class SmartModelResolver:
             self.model_cache.set(key, value)
 
     def find_best_model(self, object_type: str, context: str = "") -> Optional[str]:
-        """Finds the best model URI for a given object type and context using a multi-step strategy."""
+        """Finds the best model URI for a given object type and context using a multi-step strategy.
+
+        Results, including failures, are remembered for the resolver's lifetime
+        so one generation never searches for the same type twice.
+        """
         cache_key = f"{object_type.lower()}_{context}"
+        if cache_key not in self._session_results:
+            self._session_results[cache_key] = self._resolve(object_type, context, cache_key)
+            if len(self._rejected_uris) > self._reported_rejections:
+                logger.info("Skipped %d unusable local models (missing assets or geometry); "
+                            "reasons are logged at DEBUG level", len(self._rejected_uris))
+                self._reported_rejections = len(self._rejected_uris)
+        return self._session_results[cache_key]
+
+    def _resolve(self, object_type: str, context: str, cache_key: str) -> Optional[str]:
         cached = self._cache_get(cache_key)
         if cached is not None and self._uri_suitable(cached, object_type):
             return cached
@@ -299,6 +318,19 @@ class SmartModelResolver:
         if selected_model_name:
             return self._cache_selection(cache_key, selected_model_name, object_type)
 
+        # Category words ("obstacle") are satisfied by any of their concrete forms.
+        for substitute in substitutes_for(object_type):
+            selected_model_name = self._find_local_model_by_keyword(substitute)
+            if selected_model_name:
+                logger.info("Using '%s' as a concrete '%s'", substitute, object_type)
+                return self._cache_selection(cache_key, selected_model_name, substitute)
+
+        if self.llm:
+            selected_model_name = self._find_local_model_by_llm(
+                object_type, context, allow_unmatched=True)
+            if selected_model_name and self._candidate_suitable(selected_model_name, object_type):
+                return self._cache_selection(cache_key, selected_model_name, object_type)
+
         if self.online_db:
             logger.info(f"No suitable local model found for '{object_type}'. Searching online...")
             online_uri = self._find_online_model(object_type, context)
@@ -311,6 +343,10 @@ class SmartModelResolver:
             logger.info(f"🔧 Using hardcoded fallback: {fallback_uri}")
             self._cache_set(cache_key, fallback_uri)
             return fallback_uri
+        if primitive_size(object_type):
+            # Not persisted: a later run with more models installed should retry.
+            logger.info("No model for generic '%s'; using a primitive box", object_type)
+            return PRIMITIVE_URI
         logger.error("No visible, suitably sized model found for '%s'", object_type)
         self._cache_set(cache_key, None)
         return None
@@ -345,26 +381,34 @@ class SmartModelResolver:
 
     def _candidate_suitable(self, model_name: str, object_type: str) -> bool:
         if self._name_score(model_name, object_type) < 0:
-            logger.warning("Rejected %s for %s: name describes an accessory", model_name, object_type)
+            logger.debug("Rejected %s for %s: name describes an accessory", model_name, object_type)
             return False
         directory_name = self.get_directory_for_model(model_name) or model_name
         return self._uri_suitable(f"model://{directory_name}", object_type)
 
     def _uri_suitable(self, uri: str, object_type: str) -> bool:
+        key = (uri, object_type.lower())
+        if key not in self._suitability:
+            self._suitability[key] = self._check_uri(uri, object_type)
+        return self._suitability[key]
+
+    def _check_uri(self, uri: str, object_type: str) -> bool:
         if not uri.startswith("model://"):
             return False
         directory_name = uri.removeprefix("model://")
         if self._name_score(directory_name, object_type) < 0:
-            logger.warning("Rejected %s for %s: name describes an accessory", uri, object_type)
+            logger.debug("Rejected %s for %s: name describes an accessory", uri, object_type)
             return False
         model_dir = next((base / directory_name for base in self._model_search_paths()
                           if (base / directory_name / "model.sdf").is_file()), None)
         if model_dir is None:
-            logger.warning("Rejected %s: model directory is unavailable", uri)
+            logger.debug("Rejected %s: model directory is unavailable", uri)
+            self._rejected_uris.add(uri)
             return False
         inspection = inspect_model_visuals(model_dir, self._model_search_paths())
         if inspection.error:
-            logger.warning("Rejected %s: %s", uri, inspection.error)
+            logger.debug("Rejected %s: %s", uri, inspection.error)
+            self._rejected_uris.add(uri)
             return False
         expected = Config.DEFAULT_OBJECT_SIZES.get(object_type.lower())
         if object_type.lower() in GROUND_FURNITURE and expected and inspection.dimensions:
@@ -373,7 +417,7 @@ class SmartModelResolver:
             if (actual_xy[0] < expected_xy[0] * 0.35 or
                     actual_xy[1] < expected_xy[1] * 0.35 or
                     inspection.dimensions[2] < expected[2] * 0.35):
-                logger.warning("Rejected %s for %s: visual size %s is too small",
+                logger.debug("Rejected %s for %s: visual size %s is too small",
                                uri, object_type, inspection.dimensions)
                 return False
         return True
@@ -406,23 +450,27 @@ class SmartModelResolver:
                 return guidance
         return ""  # No specific guidance for this object type
 
-    def _find_local_model_by_llm(self, object_type: str, context: str) -> Optional[str]:
-        """Uses LLM to pick the most appropriate local model from available candidates."""
+    def _find_local_model_by_llm(self, object_type: str, context: str,
+                                 allow_unmatched: bool = False) -> Optional[str]:
+        """Uses LLM to pick the most appropriate local model from available candidates.
+
+        With allow_unmatched, models sharing no name token are offered too, so
+        the LLM can still map related names (couch for sofa).
+        """
         if not self.prompt_manager:
             logger.debug("No PromptManager available, skipping LLM-based local model selection")
             return None
-            
-        candidates = sorted(self.local_models,
-                            key=lambda name: (-self._name_score(name, object_type), name))
-        candidates = [name for name in candidates if self._name_score(name, object_type) > 0
-                      and self._candidate_suitable(name, object_type)][:75]
-        if not candidates:
-            # Preserve semantic LLM selection when a model uses a related
-            # name with no shared token (for example, couch for sofa).
+
+        if allow_unmatched:
             candidates = [name for name in sorted(self.local_models)
                           if self._candidate_suitable(name, object_type)][:75]
-            if not candidates:
-                return None
+        else:
+            candidates = sorted(self.local_models,
+                                key=lambda name: (-self._name_score(name, object_type), name))
+            candidates = [name for name in candidates if self._name_score(name, object_type) > 0
+                          and self._candidate_suitable(name, object_type)][:75]
+        if not candidates:
+            return None
         
         try:
             object_guidance = self._get_object_specific_guidance(object_type)

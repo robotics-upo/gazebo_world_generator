@@ -55,6 +55,12 @@ class LLMConfig(BaseModel):
         le=2.0,
         description="Temperature for LLM sampling"
     )
+    context_window: int = Field(
+        default=8192,
+        ge=2048,
+        le=1_000_000,
+        description="Model context length in tokens (prompt + response)"
+    )
 
     @field_validator('server_url')
     @classmethod
@@ -116,6 +122,12 @@ class PlacementConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description="Validation margin for collision detection (meters)"
+    )
+    max_design_rounds: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="LLM layout rounds per room (first proposal plus revisions)"
     )
     corridor_width: float = Field(
         default=1.2,

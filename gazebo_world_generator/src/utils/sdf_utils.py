@@ -22,6 +22,23 @@ def parse_sdf_file(sdf_path: str) -> Optional[ET.Element]:
         return None
 
 
+def model_origin_height(model_dir: Optional[Path]) -> float:
+    """Z of the model's own top-level <pose>.
+
+    An <include><pose> replaces that pose, so models whose origin is lifted
+    off the floor (e.g. cardboard_box, pose z=0.15) sink into the ground
+    unless the placer adds it back.
+    """
+    if model_dir is None:
+        return 0.0
+    try:
+        model = ET.parse(Path(model_dir) / "model.sdf").getroot().find("model")
+        values = (model.findtext("pose") or "").split() if model is not None else []
+        return float(values[2]) if len(values) >= 3 else 0.0
+    except (ET.ParseError, OSError, ValueError):
+        return 0.0
+
+
 def get_model_dimensions(sdf_root: ET.Element) -> Tuple[float, float, float]:
     """
     Extract model dimensions (width, length, height) from an SDF root element.

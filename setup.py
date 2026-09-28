@@ -40,7 +40,7 @@ setup(
         'setuptools', 'openai>=1.0.0', 'jsonschema>=4.0.0',
         'json5>=0.9.0', 'requests>=2.28.0', 'PyYAML>=6.0',
         'pydantic>=2.0.0', 'pydantic-settings>=2.0.0',
-        'Jinja2>=3.1.0',
+        'Jinja2>=3.1.0', 'Pillow>=9.0',
     ],
     python_requires='>=3.10',
     zip_safe=True,

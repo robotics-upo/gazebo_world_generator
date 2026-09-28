@@ -33,6 +33,10 @@ llm:
   #   - gpt-4
   model_name: "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8"
 
+  # Context length of the model in tokens (prompt + response). Layout design
+  # sends a top-down image each round, so larger windows help (e.g. 32768).
+  context_window: 8192
+
 # -----------------------------------------------------------------------------
 # Output Configuration
 # -----------------------------------------------------------------------------
@@ -101,6 +105,10 @@ placement:
   
   # Width of traffic corridors between furniture (meters)
   corridor_width: 1.2
+
+  # LLM design rounds per room: propose a layout, then revise it against
+  # measured violations until it passes or the rounds run out
+  max_design_rounds: 3
   # Conservative context budgeting without a downloaded tokenizer
   chars_per_token: 3.0
   random_seed: null

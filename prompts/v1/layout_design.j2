@@ -1,0 +1,41 @@
+You are designing the furniture/object layout of one room in a Gazebo simulation. You decide where everything goes; a checker will measure your layout and tell you what is wrong.
+
+USER REQUEST: "{{ user_request }}"
+ROOM: '{{ room_name }}' ({{ room_type }}){% if purpose %} - purpose: {{ purpose }}{% endif %}
+
+FRAME (metres): origin at the room centre, +x east, +y north. Usable floor: x in [{{ -half_x }}, {{ half_x }}], y in [{{ -half_y }}, {{ half_y }}].
+yaw is counter-clockwise in radians about +z; yaw 0 leaves an object's local axes aligned with the room. An object's front is its local axis listed below, rotated by yaw (front "+x" with yaw 1.57 faces north).
+{% if doorways %}
+DOORWAYS (keep their clearance zones free; people and robots enter here):
+{% for door in doorways %}
+- {{ door.side }} wall, centred at ({{ door.x }}, {{ door.y }}), clearance zone x [{{ door.zone[0] }}, {{ door.zone[1] }}], y [{{ door.zone[2] }}, {{ door.zone[3] }}]
+{% endfor %}
+{% else %}
+DOORWAYS: none
+{% endif %}
+{% if fixed %}
+ALREADY IN THE ROOM (cannot move; avoid them):
+{% for item in fixed %}
+- {{ item.id }} at ({{ "%.2f"|format(item.x) }}, {{ "%.2f"|format(item.y) }}), size {{ "%.2f"|format(item.dims[0]) }} x {{ "%.2f"|format(item.dims[1]) }} m
+{% endfor %}
+{% endif %}
+
+OBJECTS TO PLACE (use exactly these ids; sizes are measured from the real models: width along local x, length along local y):
+{% for item in items %}
+- {{ item.id }}: {{ item.model }}, {{ "%.2f"|format(item.dims[0]) }} x {{ "%.2f"|format(item.dims[1]) }} x {{ "%.2f"|format(item.dims[2]) }} m{% if item.description %} - {{ item.description }}{% endif %}
+{% endfor %}
+
+HOW TO DESIGN:
+1. Decide what arrangement serves the request and purpose (e.g. workstations with chairs at desks, storage rows with aisles, a staggered obstacle course a robot must weave through, clear floor for testing). Think like the person who asked.
+2. Choose the few REQUIREMENTS that capture what the user asked for, so the checker can verify it. Always checked anyway: every id placed, inside the room, no overlaps, doorways clear. Only add a check that expresses the request (a chair belongs at its desk -> near + faces; robots must get through -> path_between_doors); do not tie together objects that have no functional relationship. Optional checks:
+{% for name, spec in catalogue.items() %}
+   - {"check": "{{ name }}", {{ spec[0] }}}: {{ spec[1] }}
+{% endfor %}
+   Robots need about 0.8 m wide passages; people about 0.9 m.
+3. Give every object x, y, yaw. Only small items resting on top of furniture (a monitor or lamp on a desk) set "on" to the supporting id and sit inside its footprint; floor furniture such as chairs never uses "on".
+4. State each model's front (the side a person uses or faces from: a chair's seat side, a desk's user side, a shelf's open side) in "fronts" as one of "+x", "-x", "+y", "-y" in the model's own axes, e.g. {"chair": "-y"}. The checker uses it for "faces"; the default is "+x".{% if has_views %} Work it out from the MODEL VIEWS panel: each model is drawn alone at yaw 0 from above with its +x (red) and +y (green) axes; darker dots are taller parts, so a chair's backrest (dark band) marks its back and its front is the opposite side.{% endif %}
+
+{% if has_image %}The attached image shows the empty room from above: 1 m grid, axis labels in metres, doorway zones in green.{% endif %}
+
+Reply with ONLY this JSON (no markdown):
+{"requirements": [{"check": "...", ...}], "fronts": {}, "objects": [{"id": "...", "x": 0.0, "y": 0.0, "yaw": 0.0}]}

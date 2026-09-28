@@ -5,7 +5,7 @@ Defines Room, GazeboModel, and PlacementConstraint classes to represent
 the world layout, objects, and placement rules.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
 
@@ -24,6 +24,8 @@ class Room:
 
     connections: Dict[str, str] = field(default_factory=dict)
     doorways: List[Dict[str, float]] = field(default_factory=list)  # List of {side, x, y, width}
+    purpose: str = ""  # What the user wants the room for, in their words
+    free_point: Optional[Tuple[float, float]] = None  # Room-local spot clear of objects
 
 
 @dataclass

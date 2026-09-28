@@ -90,11 +90,17 @@ def test_seed_resets_between_runs(mock_llm_interface, tmp_path):
     assert generator.placement_engine.rng.random() == expected
 
 
+def _world(tmp_path):
+    world = tmp_path / "world.sdf"
+    world.write_text("<sdf version='1.7'><world name='w'/></sdf>")
+    return str(world)
+
+
 def test_map_requires_both_files(tmp_path):
     with patch("gazebo_world_generator.gazebo_world_generator.subprocess.run") as run:
         run.return_value.returncode = 0
         with pytest.raises(RuntimeError, match="missing or empty"):
-            generate_occupancy_map("world.sdf", tmp_path)
+            generate_occupancy_map(_world(tmp_path), tmp_path)
 
 
 def test_map_failure_reports_script_output(tmp_path):
@@ -103,7 +109,7 @@ def test_map_failure_reports_script_output(tmp_path):
         run.return_value.stderr = ""
         run.return_value.stdout = "plugin failed to load"
         with pytest.raises(RuntimeError, match="plugin failed to load"):
-            generate_occupancy_map("world.sdf", tmp_path)
+            generate_occupancy_map(_world(tmp_path), tmp_path)
 
 
 def test_map_does_not_interrupt_active_classic_simulator(tmp_path):
@@ -111,7 +117,7 @@ def test_map_does_not_interrupt_active_classic_simulator(tmp_path):
                return_value=True), \
          patch("gazebo_world_generator.gazebo_world_generator.subprocess.run") as run:
         with pytest.raises(RuntimeError, match="Close the active Gazebo Classic server"):
-            generate_occupancy_map("world.sdf", tmp_path)
+            generate_occupancy_map(_world(tmp_path), tmp_path)
         run.assert_not_called()
 
 

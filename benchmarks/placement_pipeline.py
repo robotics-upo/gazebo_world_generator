@@ -1,6 +1,11 @@
-"""Deterministic, offline placement baseline for 10, 50, and 100 objects."""
+"""Deterministic, offline placement baseline for 10, 50, and 100 objects.
+
+Without an LLM the layout designer falls back to its seeded sampler, so this
+measures the sampler, the checks and model creation.
+"""
 
 import json
+import math
 import os
 import statistics
 import time
@@ -9,6 +14,7 @@ from pathlib import Path
 from gazebo_world_generator.src.core.data_models import Room
 from gazebo_world_generator.src.placement.engine import NaturalPlacementEngine
 from gazebo_world_generator.src.config.validated_settings import PlacementConfig
+from gazebo_world_generator.src.placement.checks import OVERLAP_TOLERANCE, footprint, penetration
 
 
 class FixtureCatalog:
@@ -18,9 +24,14 @@ class FixtureCatalog:
         return "model://test_crate"
 
 
-def overlaps(first, second, width=0.8, length=0.4):
-    return (abs(first.pose["x"] - second.pose["x"]) < width and
-            abs(first.pose["y"] - second.pose["y"]) < length)
+def overlaps(first, second, dims, offset):
+    """True when the rotated footprints of two placed models intersect."""
+    def box(model):
+        yaw = model.pose["yaw"]
+        x = model.pose["x"] + offset[0] * math.cos(yaw) - offset[1] * math.sin(yaw)
+        y = model.pose["y"] + offset[0] * math.sin(yaw) + offset[1] * math.cos(yaw)
+        return footprint(x, y, dims, yaw)
+    return min(penetration(box(first), box(second))) > OVERLAP_TOLERANCE
 
 
 def measure(count):
@@ -37,7 +48,9 @@ def measure(count):
         start = time.perf_counter()
         placed = engine.place_all_objects([room], lambda _type: next(names))
         timings.append(time.perf_counter() - start)
-    collisions = sum(overlaps(first, second)
+    dims = engine.get_actual_model_dimensions("storage_rack", "test_crate", room.type)
+    offset = engine.model_offsets_cache.get(f"storage_rack_test_crate_{room.type}", (0.0, 0.0, 0.0))
+    collisions = sum(overlaps(first, second, dims, offset)
                      for index, first in enumerate(placed)
                      for second in placed[index + 1:])
     if len(placed) != count or collisions:

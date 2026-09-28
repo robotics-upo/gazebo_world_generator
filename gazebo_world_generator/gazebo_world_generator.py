@@ -12,6 +12,8 @@ import argparse
 import logging
 import re
 import subprocess
+import tempfile
+import xml.etree.ElementTree as ET
 import os
 from pathlib import Path
 
@@ -171,7 +173,8 @@ def run_generation(
                 str(final_world), output_manager.base_output_dir / "occupancy_maps",
                 simulator=validated_config.simulator,
                 model_paths=[*validated_config.models.search_paths,
-                             validated_config.models.cache_directory]
+                             validated_config.models.cache_directory],
+                seed=generator.map_seed()
             )
             print(f"{Style.GREEN}  ✓ Occupancy map generated successfully{Style.ENDC}")
             logger.info("✅ Occupancy map generated:")
@@ -231,13 +234,70 @@ def _classic_server_running():
     return False
 
 
-def generate_occupancy_map(world_file, output_dir, simulator="classic", model_paths=None):
+# Classic's map plugin marks a cell occupied by casting rays along its edges.
+# Faces lying exactly on those edges (common with round coordinates) can be
+# missed, leaving objects open on one side. The map copy is shifted by a
+# quarter cell and the saved map origin shifted back, so no face coincides.
+CLASSIC_MAP_SHIFT = 0.0125
+
+
+def _world_with_map_plugin(world_file, output_dir, simulator, seed, directory, shift=0.0):
+    """Copy of the world, moved by `shift` in x and y, with the map plugin configured.
+
+    The plugin flood-fills from `seed` instead of world (0, 0), which may be
+    inside an object. The copy keeps the world's file name, so the map is
+    named after it.
+    """
+    x, y = seed[0] + shift, seed[1] + shift
+    if simulator == "harmonic":
+        output_path = Path(output_dir).resolve() / Path(world_file).stem
+        plugin = (f'<plugin filename="gz_2Dmap_system" name="gz::sim::systems::OccupancyMapFromWorld">'
+                  f'<map_resolution>0.05</map_resolution><map_height>0.2</map_height>'
+                  f'<init_robot_x>{x:.4f}</init_robot_x><init_robot_y>{y:.4f}</init_robot_y>'
+                  f'<output_path>{output_path}</output_path></plugin>')
+    else:
+        plugin = (f"<plugin name='gazebo_occupancy_map' filename='libgazebo_2Dmap_plugin.so'>"
+                  f"<init_robot_x>{x:.4f}</init_robot_x><init_robot_y>{y:.4f}</init_robot_y></plugin>")
+    root = ET.parse(world_file).getroot()
+    world = root.find("world")
+    if shift:
+        for element in world.findall("model") + world.findall("include"):
+            pose = element.find("pose")
+            if pose is None:
+                pose = ET.SubElement(element, "pose")
+            values = [float(value) for value in (pose.text or "").split()] or [0.0] * 6
+            values += [0.0] * (6 - len(values))
+            values[0] += shift
+            values[1] += shift
+            pose.text = " ".join(f"{value:.4f}" for value in values)
+    world.append(ET.fromstring(plugin))
+    copy = Path(directory) / Path(world_file).name
+    ET.ElementTree(root).write(copy, encoding="unicode")
+    return str(copy)
+
+
+def _shift_map_origin(yaml_path, shift):
+    """Undo the map copy's shift in the saved map's origin."""
+    text = Path(yaml_path).read_text()
+    match = re.search(r"origin:\s*\[([^\]]*)\]", text)
+    if not match:
+        return
+    values = [float(value) for value in match.group(1).split(",")]
+    values[0] -= shift
+    values[1] -= shift
+    origin = ", ".join(f"{value:.4f}".rstrip("0").rstrip(".") for value in values)
+    Path(yaml_path).write_text(text[:match.start()] + f"origin: [{origin}]" + text[match.end():])
+
+
+def generate_occupancy_map(world_file, output_dir, simulator="classic", model_paths=None,
+                           seed=None):
     """
     Generate an occupancy map from a Gazebo world file using gazebo_ros2_2dmap_plugin.
 
     Args:
         world_file: Path to the .sdf world file
         output_dir: Directory to save the occupancy map
+        seed: World (x, y) on open floor where the map's flood fill starts
 
     Returns:
         dict: Paths to generated map files {'yaml': path, 'pgm': path}
@@ -263,25 +323,31 @@ def generate_occupancy_map(world_file, output_dir, simulator="classic", model_pa
         configured = os.pathsep.join(str(Path(path).expanduser()) for path in model_paths)
         map_environment[variable] = os.pathsep.join(
             part for part in (configured, map_environment.get(variable, "")) if part)
-    result = subprocess.run(
-        [
-            "ros2",
-            "run",
-            "gazebo_ros2_2dmap_plugin",
-            "generate_map.sh",
-            world_file,
-            output_dir,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=240,
-        env=map_environment,
-    )
+    shift = CLASSIC_MAP_SHIFT if simulator == "classic" else 0.0
+    with tempfile.TemporaryDirectory() as directory:
+        map_world = _world_with_map_plugin(world_file, output_dir, simulator,
+                                           seed or (0.0, 0.0), directory, shift)
+        result = subprocess.run(
+            [
+                "ros2",
+                "run",
+                "gazebo_ros2_2dmap_plugin",
+                "generate_map.sh",
+                map_world,
+                str(output_dir),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=240,
+            env=map_environment,
+        )
 
     if result.returncode == 0:
         if all(Path(path).is_file() and Path(path).stat().st_size > 0 and
                Path(path).stat().st_mtime_ns > prior_mtimes[key]
                for key, path in paths.items()):
+            if shift:
+                _shift_map_origin(paths["yaml"], shift)
             return paths
         raise RuntimeError("Map command succeeded but fresh PGM or YAML output is missing or empty")
     raise RuntimeError((result.stderr or result.stdout).strip() or

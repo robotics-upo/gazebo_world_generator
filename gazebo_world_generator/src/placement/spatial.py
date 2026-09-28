@@ -11,6 +11,7 @@ import math
 from typing import Dict, Tuple, Optional
 from gazebo_world_generator.src.utils.sdf_parser import SDFDimensionExtractor
 from gazebo_world_generator.src.utils.file_utils import find_gazebo_model_path
+from gazebo_world_generator.src.core.object_vocabulary import primitive_size
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,8 @@ class SpatialRegistry:
         
         # Fallback to hardcoded values
         if not dimensions:
-            dimensions = self.default_sizes.get(object_type, self.default_sizes['default'])
+            dimensions = (self.default_sizes.get(object_type) or primitive_size(object_type)
+                          or self.default_sizes['default'])
             logger.debug(f"Using fallback dimensions for '{object_type}': {dimensions}")
         
         # Cache the result

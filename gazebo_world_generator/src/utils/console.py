@@ -166,6 +166,9 @@ class ConsoleHandler(logging.Handler):
             )
             print(f"{Style.GREEN}  ✓ Parsed {num_rooms} room(s){time_str}{Style.ENDC}")
 
+        elif msg.startswith("Interpreted room"):
+            print(f"    {Style.DIM}•{Style.ENDC} {msg.removeprefix('Interpreted room ')}")
+
         # Room structure creation
         elif "Creating room structure" in msg:
             print(f"  {Style.CYAN}⚙{Style.ENDC}  Creating room structures...")
@@ -204,8 +207,11 @@ class ConsoleHandler(logging.Handler):
         elif "Model resolution complete" in msg:
             self._stop_spinner()
             print(
-                f"    {Style.DIM}├─{Style.ENDC} {Style.GREEN}✓{Style.ENDC} Model dimensions ready"
+                f"    {Style.DIM}├─{Style.ENDC} {Style.GREEN}✓{Style.ENDC} Models resolved"
             )
+            for obj_type, model in self.model_selections:
+                print(f"      {Style.DIM}• {obj_type}: {model}{Style.ENDC}")
+            self.model_selections = []
 
         # Semantic grouping
         elif (
@@ -247,152 +253,27 @@ class ConsoleHandler(logging.Handler):
             if obj_type and model:
                 self.model_selections.append((obj_type, model))
 
-        # LLM placement
-        elif "Requesting LLM to place" in msg or "Requesting LLM to position" in msg:
-            self._start_spinner("Generating placement plan with LLM...", indent="    ")
-            self._start_phase("placement")
+        # LLM layout design rounds
+        elif msg.startswith("Layout design round"):
+            match = re.search(r"round (\d+)/(\d+)", msg)
+            label = f" (round {match.group(1)}/{match.group(2)})" if match else ""
+            self._start_spinner(f"Designing layout with LLM{label}...", indent="    ")
+            self._start_phase("layout")
 
-        elif "✅ LLM placement successful" in msg or "LLM generated a valid" in msg:
+        elif msg.startswith("Layout round"):
             self._stop_spinner()
-            if not self.gear_message_shown:
-                print(
-                    f"    {Style.DIM}├─{Style.ENDC} {Style.CYAN}⚙{Style.ENDC}  Generating placement plan with LLM..."
-                )
-            duration = self._end_phase("placement")
+            duration = self._end_phase("layout")
             time_str = (
                 f" {Style.DIM}({self._format_duration(duration)}){Style.ENDC}"
                 if duration
                 else ""
             )
-            print(
-                f"    {Style.DIM}├─{Style.ENDC} {Style.GREEN}✓{Style.ENDC} Placement plan generated{time_str}"
-            )
+            clean = re.search(r": 0 problem", msg) is not None
+            icon = f"{Style.GREEN}✓{Style.ENDC}" if clean else f"{Style.YELLOW}·{Style.ENDC}"
+            print(f"    {Style.DIM}├─{Style.ENDC} {icon} {msg.removeprefix('Layout ')}{time_str}")
 
-        # LLM self-correction
-        elif "LLM self-correction" in msg:
-            self._start_spinner("LLM reviewing placement...", indent="    ")
-            self._start_phase("self_correction")
-
-        elif "LLM review: No issues" in msg or "Applied" in msg and "correction" in msg:
-            self._stop_spinner()
-            if not self.gear_message_shown:
-                print(
-                    f"    {Style.DIM}├─{Style.ENDC} {Style.CYAN}⚙{Style.ENDC}  LLM reviewing placement..."
-                )
-            duration = self._end_phase("self_correction")
-            time_str = (
-                f" {Style.DIM}({self._format_duration(duration)}){Style.ENDC}"
-                if duration
-                else ""
-            )
-            if "No issues" in msg:
-                print(
-                    f"    {Style.DIM}├─{Style.ENDC} {Style.GREEN}✓{Style.ENDC} Self-correction: No issues found{time_str}"
-                )
-            else:
-                # Extract number of corrections from message
-                match = re.search(r"(\d+)\s+correction", msg)
-                count = match.group(1) if match else "?"
-                print(
-                    f"    {Style.DIM}├─{Style.ENDC} {Style.GREEN}✓{Style.ENDC} Applied {count} correction(s){time_str}"
-                )
-
-        # Validation
-        elif "Validating placement" in msg:
-            self._start_spinner("Validating and correcting positions...", indent="    ")
-            self._start_phase("validation")
-
-        # Collision detection (sub-message of validation)
-        elif "Collision detection converged" in msg:
-            self._stop_spinner()
-            if not self.gear_message_shown:
-                print(
-                    f"    {Style.DIM}├─{Style.ENDC} {Style.CYAN}⚙{Style.ENDC}  Validating and correcting positions..."
-                )
-                self.gear_message_shown = True
-            match = re.search(r"after (\d+) iteration", msg)
-            iterations = match.group(1) if match else "?"
-            print(
-                f"    {Style.DIM}|  ├─ ✓ Collision detection converged after {iterations} iteration(s){Style.ENDC}"
-            )
-
-        elif (
-            "🚪 Enforcing doorway clearance" in msg
-            or "🚪 Ensuring doorway clearance" in msg
-        ):
-            if "doorway_clearance" in self.shown_messages:
-                return
-            self.shown_messages.add("doorway_clearance")
-            self._stop_spinner(show_gear=True)
-            print(f"    {Style.DIM}|  ├─ ⚙ Enforcing doorway clearance...{Style.ENDC}")
-            return
-
-        elif "🪑 Enforcing desk/table-chair relationships" in msg:
-            if "chair_positioning" in self.shown_messages:
-                return
-            self.shown_messages.add("chair_positioning")
-            self._stop_spinner(show_gear=True)
-            print(f"    {Style.DIM}|  ├─ ⚙ Positioning chairs at desks...{Style.ENDC}")
-            return
-
-        # Validation sub-phase completions
-        elif "✓ Cleared" in msg and "doorway zones" in msg:
-            match = re.search(r"(\d+)", msg)
-            count = match.group(1) if match else "?"
-            print(
-                f"    {Style.DIM}|  ├─ ✓ Cleared {count} object(s) from doorways{Style.ENDC}"
-            )
-            return
-
-        elif "✓ Adjusted" in msg and "chair(s)" in msg:
-            match = re.search(r"(\d+)", msg)
-            count = match.group(1) if match else "?"
-            print(
-                f"    {Style.DIM}|  ├─ ✓ Positioned {count} chair(s) at desks{Style.ENDC}"
-            )
-            return
-
-        elif "Validation complete" in msg:
-            self._stop_spinner()
-            if not self.gear_message_shown:
-                print(
-                    f"    {Style.DIM}├─{Style.ENDC} {Style.CYAN}⚙{Style.ENDC}  Validating and correcting positions..."
-                )
-            duration = self._end_phase("validation")
-            time_str = (
-                f" {Style.DIM}({self._format_duration(duration)}){Style.ENDC}"
-                if duration
-                else ""
-            )
-            match = re.search(r"(\d+)\s+objects positioned", msg)
-            count = match.group(1) if match else "?"
-            print(
-                f"    {Style.DIM}├─{Style.ENDC} {Style.GREEN}✓{Style.ENDC} Validation complete ({count} objects){time_str}"
-            )
-
-        # Semantic enforcement 
-        elif "Enforcing semantic group" in msg:
-            print(f"    {Style.DIM}├─{Style.ENDC} Applying semantic constraints...")
-
-        # Wall furniture snapping 
-        elif "Positioning wall furniture" in msg:
-            print(f"    {Style.DIM}├─{Style.ENDC} Snapping wall furniture...")
-
-        # Model resolution
-        elif "Resolving models and creating" in msg:
-            count = msg.split()[4] if len(msg.split()) > 4 else "?"
-            print(
-                f"    {Style.DIM}├─{Style.ENDC} Resolving 3D models ({count} objects)..."
-            )
-            # Show buffered model selections
-            if self.model_selections:
-                for obj_type, model in self.model_selections[:3]:  # Show max 3
-                    print(f"      {Style.DIM}• {obj_type}: {model}{Style.ENDC}")
-                if len(self.model_selections) > 3:
-                    print(
-                        f"      {Style.DIM}• ... and {len(self.model_selections) - 3} more{Style.ENDC}"
-                    )
-                self.model_selections = []
+        elif msg.startswith("Layout matches request"):
+            print(f"    {Style.DIM}├─{Style.ENDC} {Style.GREEN}✓{Style.ENDC} Layout matches request")
 
         # Online search (if needed)
         elif "Searching online" in msg or "No suitable local model" in msg:

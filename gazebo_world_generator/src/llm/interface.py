@@ -20,10 +20,16 @@ from gazebo_world_generator.src.utils import llm_utils
 from gazebo_world_generator.src.utils.circuit_breaker import get_circuit_breaker
 from gazebo_world_generator.src.utils.cache import get_cache, cache_key
 from gazebo_world_generator.src.utils.json_validator import JSONValidator
+from gazebo_world_generator.src.utils.token_estimator import estimate_tokens
 from gazebo_world_generator.src.exceptions import CircuitBreakerOpenError
 from gazebo_world_generator.src.prompts.manager import PromptManager
+from gazebo_world_generator.src.core.object_vocabulary import (
+    IMPLIED_OBJECTS, normalize_type)
 
 logger = logging.getLogger(__name__)
+
+EMPTY_ROOM_PATTERN = re.compile(
+    r"\b(empty|bare|unfurnished|no (?:objects|furniture))\b", re.IGNORECASE)
 
 
 ROOM_SCHEMA = {
@@ -60,10 +66,12 @@ ROOM_SCHEMA = {
                                 "type": {"type": "string"},
                                 "count": {"type": "integer", "minimum": 1},
                                 "semantic_context": {"type": "string"},
+                                "inferred": {"type": "boolean"},
                             },
                             "required": ["type", "count"],
                         },
                     },
+                    "purpose": {"type": "string"},
                 },
                 "required": ["name", "type"],
             },
@@ -97,6 +105,8 @@ class OpenAICompatibleInterface(LLMBase):
             base_url = f"{base_url.rstrip('/')}/v1"
 
         self.model_name = model_name
+        # Overwritten from config (llm.context_window) by the WorldGenerator.
+        self.context_window = 8192
         self.api_key = os.environ.get("OPENAI_API_KEY", "sk-dummy-key")
         self.timeout = timeout
         self.enable_circuit_breaker = enable_circuit_breaker
@@ -166,15 +176,13 @@ class OpenAICompatibleInterface(LLMBase):
                 return cached_response
 
         # Calculate safe max_tokens based on model context limit
-        MODEL_CONTEXT_LIMIT = 8192
         SAFETY_MARGIN = 200  # Reserve tokens for overhead and formatting
-        
-        # More conservative token estimation: ~3 chars per token (accounts for technical text, JSON)
-        input_text = "\n".join([msg.get("content", "") for msg in messages])
-        estimated_input_tokens = len(input_text) // 3
-        
+
+        # Conservative estimate: ~3 chars per token plus a fixed cost per image
+        estimated_input_tokens = estimate_tokens(messages)
+
         # Calculate maximum available tokens for response
-        available_tokens = MODEL_CONTEXT_LIMIT - estimated_input_tokens - SAFETY_MARGIN
+        available_tokens = self.context_window - estimated_input_tokens - SAFETY_MARGIN
         
         # Use the smaller of requested max_tokens or available space
         safe_max_tokens = min(max_tokens, available_tokens)
@@ -190,7 +198,7 @@ class OpenAICompatibleInterface(LLMBase):
         if safe_max_tokens < max_tokens:
             logger.debug(
                 f"Adjusted max_tokens from {max_tokens} to {safe_max_tokens} "
-                f"(input: ~{estimated_input_tokens} tokens, limit: {MODEL_CONTEXT_LIMIT})"
+                f"(input: ~{estimated_input_tokens} tokens, limit: {self.context_window})"
             )
 
         # Define the actual API call function
@@ -330,6 +338,7 @@ class OpenAICompatibleInterface(LLMBase):
                     # Use the already-parsed JSON
 
                     # Validate schema compliance
+                    self._normalize_rooms(parsed_json, description)
                     self._balance_object_distribution(parsed_json)
                     jsonschema.validate(instance=parsed_json, schema=ROOM_SCHEMA)
 
@@ -339,7 +348,8 @@ class OpenAICompatibleInterface(LLMBase):
                         objects = room.get('objects', [])
                         logger.debug(f"Room '{room_name}' objects: {objects}")
                         for obj in objects:
-                            logger.info(f"  → Parsed object: type='{obj.get('type')}', count={obj.get('count', 1)}")
+                            inferred = " (inferred)" if obj.get('inferred') else ""
+                            logger.info(f"  → Parsed object: type='{obj.get('type')}', count={obj.get('count', 1)}{inferred}")
 
                     logger.info(f"✓ Successfully parsed {len(parsed_json.get('rooms', []))} rooms from description.")
                     
@@ -384,6 +394,32 @@ class OpenAICompatibleInterface(LLMBase):
         return self._create_fallback_room(description)
     
     
+    def _normalize_rooms(self, parsed_data: Dict, description: str):
+        """Tidy LLM output: snake_case types, a purpose string, and implied furniture.
+
+        Rooms described by function but left empty get a minimal typical
+        furniture set marked as inferred, unless the user asked for an empty room.
+        """
+        wants_empty = bool(EMPTY_ROOM_PATTERN.search(description or ""))
+        for room in parsed_data.get("rooms", []):
+            if not isinstance(room, dict):
+                continue
+            if isinstance(room.get("type"), str):
+                room["type"] = normalize_type(room["type"]) or room["type"]
+            purpose = room.get("purpose")
+            room["purpose"] = purpose.strip() if isinstance(purpose, str) else ""
+
+            objects = room.get("objects")
+            if not isinstance(objects, list):
+                continue
+            for obj in objects:
+                if isinstance(obj, dict) and isinstance(obj.get("type"), str):
+                    obj["type"] = normalize_type(obj["type"]) or obj["type"]
+            if not objects and not wants_empty and room.get("type") in IMPLIED_OBJECTS:
+                room["objects"] = [dict(obj, inferred=True) for obj in IMPLIED_OBJECTS[room["type"]]]
+                logger.info("Room '%s' lists no objects; adding a minimal %s set (inferred)",
+                            room.get("name"), room["type"])
+
     def _balance_object_distribution(self, parsed_data: Dict):
         """Enhanced programmatic sanity check to fix imbalanced object distribution from the LLM."""
         rooms = parsed_data.get("rooms", [])
@@ -408,7 +444,9 @@ class OpenAICompatibleInterface(LLMBase):
             object_entry_counts = []
 
             for i in indices:
-                room_objects = rooms[i].get("objects", [])
+                # Inferred defaults belong to their room; only redistribute requested objects.
+                room_objects = [obj for obj in rooms[i].get("objects", [])
+                                if not (isinstance(obj, dict) and obj.get("inferred"))]
                 all_objects.extend(room_objects)
 
                 # Count total instances in this room
@@ -447,7 +485,8 @@ class OpenAICompatibleInterface(LLMBase):
 
                 # Clear all objects from these rooms
                 for i in indices:
-                    rooms[i]["objects"] = []
+                    rooms[i]["objects"] = [obj for obj in rooms[i].get("objects", [])
+                                           if isinstance(obj, dict) and obj.get("inferred")]
 
                 # Redistribute expanded objects evenly using round-robin
                 for obj_idx, obj in enumerate(expanded_objects):
