@@ -51,6 +51,7 @@ setup(
     entry_points={
         'console_scripts': [
             'generate_world = gazebo_world_generator.gazebo_world_generator:main',
+            'render_world = gazebo_world_generator.render_world:main',
         ],
     },
 )

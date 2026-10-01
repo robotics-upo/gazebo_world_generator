@@ -24,10 +24,11 @@ def _pixel_at(metadata, width, height, pixels, x, y):
     return pixels[row * width + col]
 
 
+# Map origins include generate_occupancy_map's quarter-cell shift (MAP_SHIFT).
 @pytest.mark.parametrize("suffix,expected_origin,expected_size", [
-    ("MAP", [-5, -5, 0], (200, 200)),
-    ("CONNECTED_MAP", [-11.5, -6, 0], (460, 240)),
-    ("WAREHOUSE_MAP", [-9, -8, 0], (360, 320)),
+    ("MAP", [-5.0125, -5.0125, 0], (200, 200)),
+    ("CONNECTED_MAP", [-11.5125, -6.0125, 0], (460, 240)),
+    ("WAREHOUSE_MAP", [-9.0125, -8.0125, 0], (360, 320)),
 ])
 def test_classic_harmonic_map_parity(suffix, expected_origin, expected_size):
     classic = os.environ.get(f"GWG_CLASSIC_{suffix}")

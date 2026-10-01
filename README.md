@@ -210,6 +210,7 @@ output:
   auto_generate_map: true
 placement:
   max_design_rounds: 3       # LLM layout proposals/revisions per room
+  review_rounds: 1           # LLM reviews of each finished room (0 = off)
   corridor_width: 1.2        # meters
 ```
 
@@ -232,6 +233,13 @@ personal file.
 3. **Model resolution** – each object type is matched to a local or online (Gazebo Fuel, GitHub) model whose meshes, textures and measured size are checked.
 4. **Placement** – the LLM designs each room's layout and names the requirements it should meet (e.g. a 0.8 m route between doorways). The generator measures the layout against them and sends the problems back, with a top-down image when the model accepts images, for up to `max_design_rounds` revisions. Any overlaps left are then pushed apart.
 5. **Output** – the SDF world is written, then the occupancy map when enabled.
+
+To look at a world without opening the GUI, render it from above (one image
+per room plus an overview):
+
+```bash
+ros2 run gazebo_world_generator render_world generated_worlds/worlds/<name>.sdf --out renders/
+```
 
 ## Troubleshooting
 

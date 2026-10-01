@@ -27,6 +27,10 @@ ENV GAZEBO_WORLD_GEN_MODELS__SEARCH_PATHS='["/data/models"]' \
 
 FROM base-${ROS_DISTRO}
 SHELL ["/bin/bash", "-c"]
+# Software rendering for render_world when no display or GPU is available.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb xauth libgl1-mesa-dri \
+    && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt
 COPY . /ws/src/gazebo_world_generator

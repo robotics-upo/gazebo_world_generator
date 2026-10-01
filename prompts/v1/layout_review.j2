@@ -1,0 +1,40 @@
+Review the finished layout of this room as the person who asked for it.
+
+USER REQUEST: "{{ user_request }}"{% if purpose %}
+ROOM PURPOSE: {{ purpose }}{% endif %}
+
+LAYOUT:
+{{ layout_json }}
+
+MEASURED RELATIONS (computed from the layout and the fronts declared so far):
+{% for line in relations %}
+- {{ line }}
+{% endfor %}
+{% if space_use %}
+SPACE USE (measured):
+{% for line in space_use %}
+- {{ line }}
+{% endfor %}
+{% endif %}
+{% if violations %}
+OPEN PROBLEMS:
+{% for violation in violations %}
+- {{ violation }}
+{% endfor %}
+{% endif %}
+{% if has_image %}The attached image shows the layout from above: each object's real shape (darker = taller), its id, and a blue arrow for its declared front.
+{% endif %}
+Check every object, position AND orientation: does it do its job for the request? Typical failures: a chair turned away from its desk or table, a chair at the short end of a desk instead of a long side, seats too far from their table to use it, a screen facing away from the chair it serves, an item the request puts on furniture standing on the floor (set its "on"), furniture facing a wall, a declared front that is wrong for the model (a desk or table is used from a long side; a chair's front is its seat side, opposite the backrest), objects blocking a route the request needs.
+Then judge the arrangement as a whole, the way a person looking at {% if has_image %}the image{% else %}the layout{% endif %} would:
+1. "looks_like": describe in one sentence what the arrangement actually looks like{% if has_image %} in the image{% endif %} (e.g. "eight items in one straight line across the west half of the room", "two desks side by side, chairs on their north sides").
+2. "expected": describe in one sentence what the request implies it should look like (e.g. "items spread over the whole floor with clear aisles", "each chair at its desk's long side, facing it"). Use SPACE USE too: a few objects packed into one corner of a large room for no reason is a failure.
+3. If the two differ, move objects so it looks like "expected" (you may move any object), keeping functional relationships intact. To make an arrangement irregular (clutter, debris, strewn obstacles) do not invent coordinates: add "scatter": [{"ids": [...], "area": [x_min, x_max, y_min, y_max], "gap": 0.6}] and the code places those ids at random free spots in that area. Never scatter an arrangement that needs a pattern (a slalom, rows, a line, a ring).
+
+Reply with ONLY JSON. If everything is right:
+{"looks_like": "...", "expected": "...", "ok": true}
+Otherwise list the objects to move, corrected fronts, and - only for a real problem between functionally related objects (a seat and its desk or table, a screen and its chair) - the requirement that would have caught it, so it is checked from now on. Never add requirements between unrelated objects (obstacles, boxes, cones), e.g.:
+{"looks_like": "...", "expected": "...", "fronts": {"desk": "+x"}, "requirements": [{"check": "in_front_of", "a": "chair_0", "b": "desk_0", "max_gap": 0.3}], "objects": [{"id": "chair_0", "x": 1.2, "y": 0.4, "yaw": 1.57}]}
+Available checks:
+{% for name, spec in catalogue.items() %}
+- {"check": "{{ name }}", {{ spec[0] }}}: {{ spec[1] }}
+{% endfor %}

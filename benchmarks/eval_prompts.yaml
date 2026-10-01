@@ -1,0 +1,30 @@
+# Prompts for benchmarks/run_eval.py. Each runs once per seed with the real LLM.
+# Keep ids short and filesystem-safe; they name the generated worlds.
+- id: robotics_lab
+  description: >-
+    A robotics lab complex with a big testing room connected to two smaller office-like rooms.
+    The big testing room must have some objects that serve as an obstacle course for robot navigation testing
+- id: office_1
+  description: A 5m x 4m office with a desk and a chair
+- id: office_2
+  description: 8m x 6m office with 2 desks and 2 chairs
+- id: office_4
+  description: An open-plan office of 10m x 8m with 4 desks, each with its chair
+- id: office_monitors
+  description: An office with 2 desks, 2 chairs and a monitor on each desk
+- id: meeting_room
+  description: A meeting room with a table and 6 chairs around it
+- id: warehouse
+  description: 12m x 10m warehouse with 8 storage racks
+- id: storage_office
+  description: A storage room with 4 shelves connected to a small office with a desk and a chair
+- id: empty_room
+  description: An empty 6m x 6m room
+- id: two_offices_corridor
+  description: Two offices connected by a corridor, each with one desk and one chair
+- id: clutter_room
+  description: A 10m x 8m room cluttered with boxes, leaving a clear path between the doors
+- id: slalom
+  description: A 14m x 6m test hall where cones form a slalom course for a mobile robot
+- id: bookshelves
+  description: A small library room with 3 bookshelves against the walls and a reading table with 2 chairs

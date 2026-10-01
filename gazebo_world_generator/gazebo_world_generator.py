@@ -148,7 +148,7 @@ def run_generation(
     try:
         output_file = generator.generate_world(description, str(paths["world_file"]))
     except Exception as e:
-        logger.error(f"Generation failed: {str(e)}")
+        logger.exception(f"Generation failed: {str(e)}")
         file_handler.close()
         logging.getLogger().removeHandler(file_handler)
         print(
@@ -238,7 +238,8 @@ def _classic_server_running():
 # Faces lying exactly on those edges (common with round coordinates) can be
 # missed, leaving objects open on one side. The map copy is shifted by a
 # quarter cell and the saved map origin shifted back, so no face coincides.
-CLASSIC_MAP_SHIFT = 0.0125
+# Harmonic gets the same shift so both simulators produce the same map grid.
+MAP_SHIFT = 0.0125
 
 
 def _world_with_map_plugin(world_file, output_dir, simulator, seed, directory, shift=0.0):
@@ -323,7 +324,7 @@ def generate_occupancy_map(world_file, output_dir, simulator="classic", model_pa
         configured = os.pathsep.join(str(Path(path).expanduser()) for path in model_paths)
         map_environment[variable] = os.pathsep.join(
             part for part in (configured, map_environment.get(variable, "")) if part)
-    shift = CLASSIC_MAP_SHIFT if simulator == "classic" else 0.0
+    shift = MAP_SHIFT
     with tempfile.TemporaryDirectory() as directory:
         map_world = _world_with_map_plugin(world_file, output_dir, simulator,
                                            seed or (0.0, 0.0), directory, shift)

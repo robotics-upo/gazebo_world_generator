@@ -386,14 +386,19 @@ def _primitive_triangles(geometry):
     box = geometry.find("box")
     if box is not None:
         sx, sy, sz = (float(value) / 2 for value in box.findtext("size").split())
-        top = [(-sx, -sy, sz), (sx, -sy, sz), (sx, sy, sz), (-sx, sy, sz)]
-        return [(top[0], top[1], top[2]), (top[0], top[2], top[3])]
+        corner = [(x, y, z) for z in (-sz, sz) for y in (-sy, sy) for x in (-sx, sx)]
+        faces = ((0, 1, 3, 2), (4, 5, 7, 6), (0, 1, 5, 4), (2, 3, 7, 6), (0, 2, 6, 4), (1, 3, 7, 5))
+        return [tri for a, b, c, d in faces
+                for tri in ((corner[a], corner[b], corner[c]), (corner[a], corner[c], corner[d]))]
     cylinder = geometry.find("cylinder")
     if cylinder is not None:
         radius, half = float(cylinder.findtext("radius")), float(cylinder.findtext("length")) / 2
-        ring = [(radius * math.cos(t * math.pi / 12), radius * math.sin(t * math.pi / 12), half)
-                for t in range(24)]
-        return [((0.0, 0.0, half), ring[i], ring[(i + 1) % 24]) for i in range(24)]
+        ring = [(radius * math.cos(t * math.pi / 12), radius * math.sin(t * math.pi / 12)) for t in range(24)]
+        top = [((0.0, 0.0, half), (*ring[i], half), (*ring[(i + 1) % 24], half)) for i in range(24)]
+        sides = [tri for i in range(24) for tri in (
+            ((*ring[i], -half), (*ring[(i + 1) % 24], -half), (*ring[(i + 1) % 24], half)),
+            ((*ring[i], -half), (*ring[(i + 1) % 24], half), (*ring[i], half)))]
+        return top + sides
     sphere = geometry.find("sphere")
     if sphere is not None:
         radius = float(sphere.findtext("radius"))
@@ -441,3 +446,41 @@ def model_shape(model_dir: Path, search_paths=(), max_triangles: int = 3000):
         return triangles[::stride]
     except (ET.ParseError, OSError, ValueError, TypeError, AttributeError, IndexError):
         return None
+
+
+SIDES = {  # side -> (horizontal axis, depth measured inward from that side)
+    "+x": (1, lambda p: -p[0]), "-x": (1, lambda p: p[0]),
+    "+y": (0, lambda p: -p[1]), "-y": (0, lambda p: p[1]),
+}
+
+
+def side_closedness(triangles, band: float = 0.25, resolution: int = 80) -> dict:
+    """How closed each side of a model is, seen from outside that side (0..1).
+
+    The fraction of the model's outline on that side covered by surfaces
+    within `band` of the model's depth from it: a backrest, a back panel or a
+    modesty panel make their side closed; a seat, open shelves or knee space
+    leave it open. Used to find which side of a model is its back.
+    """
+    from PIL import Image, ImageDraw
+
+    points = [point for triangle in triangles for point in triangle]
+    result = {}
+    for side, (axis, depth_of) in SIDES.items():
+        depths = [depth_of(p) for p in points]
+        near, span = min(depths), max(depths) - min(depths)
+        limit = near + max(band * span, 0.05)
+        low_h, high_h = min(p[axis] for p in points), max(p[axis] for p in points)
+        low_z, high_z = min(p[2] for p in points), max(p[2] for p in points)
+        scale = resolution / max(high_h - low_h, high_z - low_z, 1e-6)
+        size = (int((high_h - low_h) * scale) + 2, int((high_z - low_z) * scale) + 2)
+        outline, closed = Image.new("1", size), Image.new("1", size)
+        draw_outline, draw_closed = ImageDraw.Draw(outline), ImageDraw.Draw(closed)
+        for triangle in triangles:
+            polygon = [((p[axis] - low_h) * scale, (high_z - p[2]) * scale) for p in triangle]
+            draw_outline.polygon(polygon, fill=1)
+            if min(depth_of(p) for p in triangle) <= limit:
+                draw_closed.polygon(polygon, fill=1)
+        total = sum(outline.getdata())
+        result[side] = sum(closed.getdata()) / total if total else 0.0
+    return result

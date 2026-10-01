@@ -90,6 +90,14 @@ def test_seed_resets_between_runs(mock_llm_interface, tmp_path):
     assert generator.placement_engine.rng.random() == expected
 
 
+@pytest.fixture(autouse=True)
+def no_running_gazebo(monkeypatch, request):
+    """Map tests must not depend on a Gazebo running elsewhere on the machine."""
+    if "active_classic_simulator" not in request.node.name:
+        monkeypatch.setattr("gazebo_world_generator.gazebo_world_generator._classic_server_running",
+                            lambda: False)
+
+
 def _world(tmp_path):
     world = tmp_path / "world.sdf"
     world.write_text("<sdf version='1.7'><world name='w'/></sdf>")

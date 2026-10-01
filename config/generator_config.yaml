@@ -109,6 +109,9 @@ placement:
   # LLM design rounds per room: propose a layout, then revise it against
   # measured violations until it passes or the rounds run out
   max_design_rounds: 3
+  # LLM reviews of each finished room against the request (orientation, missed
+  # relationships); 0 disables them
+  review_rounds: 1
   # Conservative context budgeting without a downloaded tokenizer
   chars_per_token: 3.0
   random_seed: null

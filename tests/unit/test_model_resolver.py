@@ -209,4 +209,5 @@ def test_model_shape_of_primitive_box(tmp_path):
     from gazebo_world_generator.src.models.visual_quality import model_shape
     triangles = model_shape(_write_box_model(tmp_path, "Crate", "0.6 0.4 0.5"))
     points = {point for triangle in triangles for point in triangle}
-    assert points == {(-0.3, -0.2, 0.25), (0.3, -0.2, 0.25), (0.3, 0.2, 0.25), (-0.3, 0.2, 0.25)}
+    assert len(triangles) == 12  # all six faces, so side views show panels
+    assert points == {(x, y, z) for x in (-0.3, 0.3) for y in (-0.2, 0.2) for z in (-0.25, 0.25)}

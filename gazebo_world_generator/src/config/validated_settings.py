@@ -129,6 +129,12 @@ class PlacementConfig(BaseModel):
         le=10,
         description="LLM layout rounds per room (first proposal plus revisions)"
     )
+    review_rounds: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description="LLM reviews of each finished room layout (0 disables the review)"
+    )
     corridor_width: float = Field(
         default=1.2,
         ge=0.5,

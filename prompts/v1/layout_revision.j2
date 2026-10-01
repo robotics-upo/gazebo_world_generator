@@ -7,6 +7,12 @@ PROBLEMS:
 {% for violation in violations %}
 - {{ violation }}
 {% endfor %}
+{% if relations %}
+MEASURED RELATIONS:
+{% for line in relations %}
+- {{ line }}
+{% endfor %}
+{% endif %}
 
 {% if has_image %}The attached image shows this layout from above: each object's shape (darker = taller) inside its footprint with its id, a blue arrow for the front you declared, problem objects outlined in red, doorway zones in green.
 {% endif %}

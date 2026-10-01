@@ -8,6 +8,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from gazebo_world_generator.gazebo_world_generator import generate_occupancy_map
 from gazebo_world_generator.src.config.validated_settings import ValidatedConfig
 from gazebo_world_generator.src.core.data_models import GazeboModel
 from gazebo_world_generator.src.world.generator import WorldGenerator
@@ -96,8 +97,8 @@ def main() -> None:
         smoke_world(output_dir / f"{name}.sdf", simulator)
     for name in ("map_room", "connected", "warehouse"):
         world = output_dir / f"{name}.sdf"
-        subprocess.run(["ros2", "run", "gazebo_ros2_2dmap_plugin", "generate_map.sh",
-                        str(world), str(output_dir)], check=True, timeout=120)
+        # The same entry point users get (seeded flood fill, quarter-cell shift).
+        generate_occupancy_map(str(world), output_dir, simulator=simulator, seed=(0.0, 0.0))
         for extension in (".pgm", ".yaml"):
             result = output_dir / f"{name}{extension}"
             if not result.is_file() or result.stat().st_size == 0:

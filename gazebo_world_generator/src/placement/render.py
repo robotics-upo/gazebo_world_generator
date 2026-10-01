@@ -13,7 +13,16 @@ from gazebo_world_generator.src.placement.checks import (
 PIXELS_PER_METRE = 60
 MARGIN = 50
 MAX_SIDE = 1400
-VIEW_SIZE = 170  # side of one model view in the legend panel
+VIEW_SIZE = 170  # side of one model's top view in the legend panel
+SIDE_WIDTH = 130  # one side elevation in the legend panel
+VIEW_CELL = VIEW_SIZE + 2 * SIDE_WIDTH + 40  # top view plus four side elevations (2 x 2)
+# (label, horizontal axis index, horizontal sign, depth function: smaller = nearer the viewer)
+SIDE_VIEWS = (
+    ("-y side", 0, 1, lambda p: p[1]),
+    ("+y side", 0, -1, lambda p: -p[1]),
+    ("-x side", 1, -1, lambda p: p[0]),
+    ("+x side", 1, 1, lambda p: -p[0]),
+)
 
 
 def render_layout(room, items: Sequence[Dict], violations: Iterable[Violation] = (),
@@ -32,7 +41,7 @@ def render_layout(room, items: Sequence[Dict], violations: Iterable[Violation] =
     views = [view for view in model_views if view.get("shape")]
     columns = max(1, (height - 40) // (VIEW_SIZE + 30)) if views else 0
     panel_columns = -(-len(views) // columns) if views else 0
-    width = room_width + panel_columns * (VIEW_SIZE + 20)
+    width = room_width + panel_columns * VIEW_CELL
     if views:
         height = max(height, 40 + min(len(views), columns) * (VIEW_SIZE + 30))
     image = Image.new("RGB", (width, height), "white")
@@ -99,6 +108,24 @@ def _draw_item(draw, item: Dict, to_px, scale: float, flagged) -> None:
     draw.text((start[0] + 4, start[1] - 12), item["id"], fill="black")
 
 
+def render_model_views(views: Sequence[Dict]) -> bytes:
+    """PNG with just the MODEL VIEWS panel (top + side views of each model)."""
+    views = [view for view in views if view.get("shape")]
+    columns = max(1, min(len(views), 3))
+    rows = -(-len(views) // columns)
+    image = Image.new("RGB", (columns * VIEW_CELL + 20, 50 + rows * (VIEW_SIZE + 30)), "white")
+    draw = ImageDraw.Draw(image)
+    # _draw_model_views fills columns top to bottom; lay out one model per cell, rows first.
+    for row in range(rows):
+        chunk = views[row * columns:(row + 1) * columns]
+        for column, view in enumerate(chunk):
+            _draw_model_views(draw, [view], column * VIEW_CELL, 1, top=40 + row * (VIEW_SIZE + 30),
+                              title=row == 0 and column == 0)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def to_data_url(png: bytes) -> str:
     return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
@@ -113,21 +140,43 @@ def _draw_shape(draw, triangles, to_px) -> None:
         draw.polygon([to_px(x, y) for x, y, _ in triangle], fill=(shade, shade, shade))
 
 
-def _draw_model_views(draw, views, left: int, columns: int) -> None:
-    """Each model alone at yaw 0 with its local axes, for judging where its front is."""
-    draw.text((left + 10, 10), "MODEL VIEWS (yaw 0, from above, darker = taller)", fill="black")
+def _draw_model_views(draw, views, left: int, columns: int, top: int = 40, title: bool = True) -> None:
+    """Each model alone at yaw 0: from above with its local axes, plus two side elevations."""
+    if title:
+        draw.text((left + 10, 10), "MODEL VIEWS at yaw 0: top (darker = taller) and the model "
+                                   "seen from each of its four sides (darker = nearer)", fill="black")
     for index, view in enumerate(views):
         column, row = divmod(index, columns)
-        ox = left + 10 + column * (VIEW_SIZE + 20)
-        oy = 40 + row * (VIEW_SIZE + 30)
-        points = [point for triangle in view["shape"] for point in triangle]
+        ox = left + 10 + column * VIEW_CELL
+        oy = top + row * (VIEW_SIZE + 30)
+        triangles = view["shape"]
+        points = [point for triangle in triangles for point in triangle]
         extent = max(max(abs(p[0]) for p in points), max(abs(p[1]) for p in points), 0.05)
         factor = (VIEW_SIZE / 2 - 22) / extent
         centre = (ox + VIEW_SIZE / 2, oy + VIEW_SIZE / 2)
         draw.rectangle([ox, oy, ox + VIEW_SIZE, oy + VIEW_SIZE], outline=(200, 200, 200))
-        _draw_shape(draw, view["shape"], lambda px, py: (centre[0] + px * factor, centre[1] - py * factor))
+        _draw_shape(draw, triangles, lambda px, py: (centre[0] + px * factor, centre[1] - py * factor))
         draw.line([centre, (ox + VIEW_SIZE - 6, centre[1])], fill=(220, 0, 0), width=2)
         draw.text((ox + VIEW_SIZE - 20, centre[1] + 4), "+x", fill=(220, 0, 0))
         draw.line([centre, (centre[0], oy + 6)], fill=(0, 150, 0), width=2)
         draw.text((centre[0] + 4, oy + 4), "+y", fill=(0, 150, 0))
         draw.text((ox, oy + VIEW_SIZE + 4), view["type"][:28], fill="black")
+
+        height = VIEW_SIZE / 2 - 6
+        top = max(max(p[2] for p in points), 0.05)
+        scale = min((SIDE_WIDTH / 2 - 8) / extent, (height - 16) / top)
+        # Each elevation shows the model as seen from outside that side (darker = nearer).
+        for panel, (label, axis, sign, depth_of) in enumerate(SIDE_VIEWS):
+            column_offset, row_offset = divmod(panel, 2)
+            px0 = ox + VIEW_SIZE + 10 + column_offset * (SIDE_WIDTH + 10)
+            py0 = oy + row_offset * (height + 12)
+            draw.rectangle([px0, py0, px0 + SIDE_WIDTH, py0 + height], outline=(200, 200, 200))
+            base = (px0 + SIDE_WIDTH / 2, py0 + height - 4)
+            depths = [min(depth_of(p) for p in t) for t in triangles]
+            low, span = min(depths), max(max(depths) - min(depths), 1e-6)
+            for depth, triangle in sorted(zip(depths, triangles), key=lambda e: -e[0]):
+                shade = int(40 + 170 * (depth - low) / span)
+                draw.polygon([(base[0] + sign * p[axis] * scale, base[1] - p[2] * scale) for p in triangle],
+                             fill=(shade, shade, shade))
+            draw.text((px0 + 4, py0 + 2), f"{label} (from outside)",
+                      fill=(220, 0, 0) if "x" in label else (0, 150, 0))

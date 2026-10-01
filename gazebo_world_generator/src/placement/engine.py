@@ -67,6 +67,7 @@ class NaturalPlacementEngine:
             max_rounds=self.config.max_design_rounds,
             wall_thickness=self.room_config.wall_thickness,
             chars_per_token=self.config.chars_per_token,
+            review_rounds=self.config.review_rounds,
         )
 
     def get_actual_model_dimensions(self, object_type: str, model_name: str = None,

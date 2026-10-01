@@ -58,7 +58,7 @@ def test_llm_layout_becomes_world_frame_models():
               "objects": [{"id": "desk_0", "x": 1.0, "y": 1.0, "yaw": 0.0},
                           {"id": "chair_0", "x": 1.0, "y": 0.2, "yaw": 1.57},
                           {"id": "monitor_0", "x": 1.0, "y": 1.1, "yaw": 0.0, "on": "desk_0"}]}
-    llm = ScriptedLLM(json.dumps(answer))
+    llm = ScriptedLLM(json.dumps(answer), json.dumps({"ok": True}))
     engine = NaturalPlacementEngine(model_db=database, llm_interface=llm)
     engine.user_description = "office with a desk, chair and monitor"
     sizes = {"desk": (1.4, 0.7, 0.75), "chair": (0.6, 0.6, 1.0), "monitor": (0.5, 0.2, 0.4)}
@@ -68,7 +68,7 @@ def test_llm_layout_becomes_world_frame_models():
             _room(), "", [{"type": "desk"}, {"type": "chair"}, {"type": "monitor"}],
             lambda n: n + "_w")
 
-    assert len(llm.requests) == 1  # clean on the first round
+    assert len(llm.requests) == 2  # clean on the first round, then accepted by the review
     prompt = llm.requests[0][0]["content"][0]["text"]
     assert "office with a desk, chair and monitor" in prompt
     assert "desk_0" in prompt and "1.40 x 0.70 x 0.75" in prompt
